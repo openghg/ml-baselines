@@ -13,6 +13,7 @@ from multiprocessing import Pool
 
 c = cdsapi.Client()
 
+#TODO: This stuff should be in a config file
 site_coords_dict = {"MHD":[53.3267, -9.9046], 
                     "RPB":[13.1651, -59.4321], 
                     "CGO":[-40.6833, 144.6894], 
@@ -96,6 +97,7 @@ def retrieve_site_month(site, level, year, month,
     else:
         raise ValueError("Invalid level. Must be 'pressure' or 'single'.")
 
+    #TODO: I think this causes an error when run in parallel. Move higher in the call stack?
     # If output path doesn't exist, create it
     if not os.path.exists(output_path):
         os.makedirs(output_path)
