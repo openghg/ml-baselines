@@ -9,23 +9,18 @@ import sys
 from pathlib import Path
 import os
 from multiprocessing import Pool
-#from ml_baselines import config
+from ml_baselines.config import Config
 
+
+#TODO: Do we need to create a new client for each request?
 c = cdsapi.Client()
 
-#TODO: This stuff should be in a config file
-site_coords_dict = {"MHD":[53.3267, -9.9046], 
-                    "RPB":[13.1651, -59.4321], 
-                    "CGO":[-40.6833, 144.6894], 
-                    "GSN":[33.2924, 126.1616],
-                    "JFJ":[46.547767, 7.985883], 
-                    "CMN":[44.1932, 10.7014], 
-                    "THD":[41.0541, -124.151], 
-                    "ZEP":[78.9072, 11.8867],
-                    "SMO": [-14.2474, -170.5644]}
+# Load configuration
+cfg = Config()
+site_coords_dict = cfg.site_coords_dict
+met_path = Path(cfg.data_path + "/meteorological_data/ECMWF")
 
-root_path = Path("/home/chxmr/data/ml-baselines/meteorological_data/ECMWF")
-
+# Months as strings with leading zeros
 months = [str(m).zfill(2) for m in range(1, 13)]
 
 
@@ -87,11 +82,11 @@ def retrieve_site_month(site, level, year, month,
         raise ValueError("Invalid site. Must be one of {}".format(site_coords_dict.keys()))
 
     if level == "pressure":
-        output_path = root_path / site / "pressure_levels"
+        output_path = met_path / site / "pressure_levels"
         output_filename = output_path / f"{site}_3dwind_{year}_{months[month]}.nc"
         dataset = 'reanalysis-era5-pressure-levels'
     elif level == "single":
-        output_path = root_path / site / "single_level"
+        output_path = met_path / site / "single_level"
         output_filename = output_path / f"{site}_2dmet_{year}_{months[month]}.nc"
         dataset = 'reanalysis-era5-single-levels'
     else:
@@ -148,7 +143,7 @@ def retrieve_site_year(level, site, year):
 
 if __name__ == '__main__':
 
-    error_log = root_path / "error_log.txt"
+    error_log = met_path / "error_log.txt"
 
     # Redirect stdout and stderr to a log file
     sys.stdout = open(error_log, "w")
