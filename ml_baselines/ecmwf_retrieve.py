@@ -92,10 +92,9 @@ def retrieve_site_month(site, level, year, month,
     else:
         raise ValueError("Invalid level. Must be 'pressure' or 'single'.")
 
-    #TODO: I think this causes an error when run in parallel. Move higher in the call stack?
     # If output path doesn't exist, create it
     if not os.path.exists(output_path):
-        os.makedirs(output_path)
+        os.makedirs(output_path, exist_ok=True)
 
     # Retrieve using CDS API
     if os.path.exists(output_filename):
@@ -109,7 +108,6 @@ def retrieve_site_month(site, level, year, month,
                   site_coords_dict[site][1]-domain_size,
                   site_coords_dict[site][0]-domain_size,
                   site_coords_dict[site][1]+domain_size)
-
 
         try:
             c.retrieve(
