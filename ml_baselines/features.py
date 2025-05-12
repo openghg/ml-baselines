@@ -83,6 +83,15 @@ time_coord = "valid_time"
 def preprocess_features(site, year):
     """Preprocesses the meteorological data for a given site.
 
+    Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
+    The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
+    The processed data will be saved to a netCDF file in the models_path / features directory.
+    The file will be named features_<site>_<year>.nc.
+    The data will be saved in the following format:
+        - time: time coordinate
+        - points: grid points
+        - variables: meteorological variables (e.g., temperature, humidity, wind speed)
+
     Args:
         site (str): Site code.
     """
