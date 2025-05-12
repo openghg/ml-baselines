@@ -1,0 +1,189 @@
+from pathlib import Path
+import numpy as np
+import xarray as xr
+
+
+from ml_baselines.config import Config
+
+
+# Load configuration
+cfg = Config()
+site_coords_dict = cfg.site_coords_dict
+met_path = Path(cfg.data_path + "/meteorological_data/ECMWF")
+models_path = Path(cfg.models_path)
+
+# Define variables to be extracted
+variables = {
+        "sp": {
+            "file": "single_level",
+            "var_in_file": "sp",
+            "level": None,
+            "units": "hPa",
+            "long_name": "Surface Pressure",
+        },
+        "blh": {
+            "file": "single_level",
+            "var_in_file": "blh",
+            "level": None,
+            "units": "m",
+            "long_name": "Boundary Layer Height",
+        },
+        "u10": {
+            "file": "single_level",
+            "var_in_file": "u10",
+            "level": None,
+            "units": "m/s",
+            "long_name": "10m U-component of Wind",
+        },
+        "v10": {
+            "file": "single_level",
+            "var_in_file": "v10",
+            "level": None,
+            "units": "m/s",
+            "long_name": "10m V-component of Wind",
+        },
+        "u850": {
+            "file": "pressure_levels",
+            "var_in_file": "u",
+            "level": 850,
+            "units": "m/s",
+            "long_name": "850hPa U-component of Wind",
+        },
+        "v850": {
+            "file": "pressure_levels",
+            "var_in_file": "v",
+            "level": 850,
+            "units": "m/s",
+            "long_name": "850hPa V-component of Wind",
+        },
+        "u500": {
+            "file": "pressure_levels",
+            "var_in_file": "u",
+            "level": 500,
+            "units": "m/s",
+            "long_name": "500hPa U-component of Wind",
+        },
+        "v500": {
+            "file": "pressure_levels",
+            "var_in_file": "v",
+            "level": 500,
+            "units": "m/s",
+            "long_name": "500hPa V-component of Wind",
+        },
+    }
+
+# Define the grid system
+lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
+lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
+
+# Define the time coordinate in the met files
+time_coord = "valid_time"
+
+
+def preprocess_features(site, year):
+    """Preprocesses the meteorological data for a given site.
+
+    Args:
+        site (str): Site code.
+    """
+
+    # Path to the data
+    data_path = met_path / site
+
+    # Get the coordinates of the site
+    site_lat, site_lon = site_coords_dict[site]
+
+    # creating a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest
+    points_lat = lats_grid + site_lat
+    points_lon = lons_grid + site_lon
+    points = range(17)
+
+    # creating an xarray DataArray for the grid coordinates
+    lats = xr.DataArray(points_lat, dims=["points"], coords={"points": points})
+    lons = xr.DataArray(points_lon, dims=["points"], coords={"points": points})
+
+    for var_name in variables.keys():
+
+        var = variables[var_name]
+        files = sorted((met_path / site.upper() / var["file"]).glob(f"{site.upper()}*{year}*.nc"))
+
+        if len(list(files)) == 0:
+            print(f"No files found for {site} in {year}: {var_name}.")
+            return
+        if len(list(files)) > 12:
+            raise ValueError(f"More than 12 files found for {site} in {year}: {var_name}. Please check the data.")
+        if len(list(files)) < 12:
+            print(f"WARNING: only {len(list(files))} months available for {site} in {year}: {var_name}.")
+            # Print missing months
+            for month in range(1, 13):
+                if not (data_path / var["file"] / f"{site.upper()}*{year}_{month:02d}*.nc").exists():
+                    print(f"... Missing month: {month:02d}")
+
+        data = []
+
+        for f in files:
+            with xr.open_dataset(f) as ds:
+                # Extract the variable and interpolate the data onto the grid
+
+                if var["level"] is not None:
+                    data_slice = ds.sel(pressure_level=var["level"])
+                    # Drop the pressure_level coordinate
+                    data_slice = data_slice.drop_vars(["pressure_level"])
+                else:
+                    data_slice = ds
+
+                data_slice = \
+                    data_slice[var["var_in_file"]]\
+                        .interp(latitude=lats, longitude=lons, method="nearest")\
+                        .assign_coords({time_coord: ds[time_coord].values})
+                if "number" in data_slice.coords:
+                    data_slice = data_slice.drop_vars(["number"])
+                if "expver" in data_slice.coords:
+                    data_slice = data_slice.drop_vars(["expver"])
+
+                data.append(data_slice)
+
+        # Concatenate the data along the time dimension, and add points as a coordinate
+        ds_var = xr.concat(data, dim=time_coord)
+
+        # Rename the time dimension to 'time'
+        ds_var = ds_var.rename({time_coord: "time"})
+
+        # If the variable has a level coordinate, rename
+        if var["level"] is not None:
+            ds_var.name = f"{var_name}"
+
+        # Rename the long_name and units attributes
+        ds_var.attrs["long_name"] = var["long_name"]
+
+        # If ds_out hasn't been created yet, create it
+        if "ds_out" not in locals():
+            ds_out = ds_var
+        else:
+            # Merge the new variable with the existing dataset
+            ds_out = xr.merge([ds_out, ds_var])
+
+    ds_out.attrs["Comment"] = "Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines"
+
+    filename = models_path / "features" / f"features_{site}_{year}.nc"
+
+    ds_out.to_netcdf(filename)
+
+    print(f"Preprocessed features for {site} in {year} and saved to {filename}")
+
+
+def preprocess_all_features(start_year=1978, end_year=2024):
+    """Preprocesses the meteorological data for all sites and years."""
+    for site in site_coords_dict.keys():
+        for year in range(start_year, end_year):
+            try:
+                preprocess_features(site, year)
+            except Exception as e:
+                print(f"Error processing {site} in {year}: {e}")
+                continue
+    print("Preprocessing complete.")
+
+
+if __name__ == "__main__":
+    # Example usage
+    preprocess_all_features()
