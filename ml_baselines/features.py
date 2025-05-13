@@ -1,7 +1,9 @@
 from pathlib import Path
 import numpy as np
 import xarray as xr
-
+import pandas as pd
+import getpass
+import gzip
 
 from ml_baselines.config import Config
 
@@ -172,11 +174,52 @@ def preprocess_features(site, year):
             # Merge the new variable with the existing dataset
             ds_out = xr.merge([ds_out, ds_var])
 
+    # For each variable, pivot the (time, points) array into a wide-form DataFrame
+    dfs = []
+    for var in ds_out.data_vars:
+        # Convert the DataArray for a variable to a DataFrame and pivot so that each grid point becomes a separate column
+        df_var = (
+            ds_out[var]
+            .to_dataframe()
+            .reset_index()
+            .pivot(index="time", columns="points", values=var)
+        )
+        # Rename columns to include the variable name (e.g., sp_0, sp_1, etc.)
+        df_var.columns = [f"{var}_{int(pt)}" for pt in df_var.columns]
+        dfs.append(df_var)
+
+    # Merge all variable-wise DataFrames on the time index
+    df = pd.concat(dfs, axis=1)
+
+    # Create a shifted copy: subtract 6 hours from time by equivalently shifting the index forward by 6 hours.
+    # For each record at time T, the _past columns will come from time T – 6 hours.
+    df_past = df.copy()
+    df_past.index = df_past.index + pd.Timedelta(hours=6)
+    df_past = df_past.add_suffix("_6h")
+
+    # Merge the current and past dataframes on their time index
+    df_final = pd.merge(df, df_past, left_index=True, right_index=True, how="left").reset_index()
+
     ds_out.attrs["Comment"] = "Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines"
 
-    filename = models_path / "features" / f"features_{site}_{year}.nc"
+    filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
 
-    ds_out.to_netcdf(filename)
+    with gzip.open(filename, "wt") as f:
+        f.write("# Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines\n")
+        f.write("# Data is interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest\n")
+        f.write("# Column names have the following format:\n")
+        f.write("# - the text before the first underscore is the variable name\n")
+        f.write("# - the text after the first underscore is the grid point number\n")
+        f.write("# - the text after the (optional) second underscore is the time shift\n")
+        # Put user name in the file
+        f.write(f"# Processed by: {getpass.getuser()}\n")
+        f.write(f"# Processed on: {pd.Timestamp.now()}\n")
+        f.write(f"# Processed by ml-baselines code\n")
+        f.write(f"# Site: {site}\n")
+        f.write(f"# Year: {year}\n")
+ 
+        # Save the DataFrame to a CSV file
+        df_final.to_csv(f, index=False, header=True, mode="a")
 
     print(f"Preprocessed features for {site} in {year} and saved to {filename}")
 
@@ -195,4 +238,4 @@ def preprocess_all_features(start_year=1978, end_year=2024):
 
 if __name__ == "__main__":
     # Example usage
-    preprocess_all_features()
+    preprocess_all_features(start_year=1978, end_year=1979)
