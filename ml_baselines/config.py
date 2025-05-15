@@ -17,7 +17,7 @@ def setup():
     config_defaults = {
         "data_path": "",
         "model_type": "MLPClassifier",
-        "models_path": str(package_dir / "models"),
+        "models_path": str(root_dir / "models"),
     }
 
     with open(config_path, "w") as f:

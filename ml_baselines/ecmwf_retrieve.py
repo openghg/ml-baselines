@@ -11,10 +11,6 @@ import os
 from multiprocessing import Pool
 from ml_baselines.config import Config
 
-
-#TODO: Do we need to create a new client for each request?
-c = cdsapi.Client()
-
 # Load configuration
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
@@ -110,10 +106,13 @@ def retrieve_site_month(site, level, year, month,
                   site_coords_dict[site][1]+domain_size)
 
         try:
+            c = cdsapi.Client(timeout=600,quiet=False)
             c.retrieve(
                 dataset,
                 retrieve_dict(level, month, year, domain),
-                output_filename)
+                output_filename,
+                )
+            del c
         except Exception as e:
             print(f'Error downloading {site} {level}: {months[month]} {year}')
             print(e)

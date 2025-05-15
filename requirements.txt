@@ -1,3 +1,6 @@
 pandas
 scikit-learn
 numpy
+xarray
+cdsapi
+netcdf4
