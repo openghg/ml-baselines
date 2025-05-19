@@ -106,13 +106,15 @@ def retrieve_site_month(site, level, year, month,
                   site_coords_dict[site][1]+domain_size)
 
         try:
-            c = cdsapi.Client(timeout=600,quiet=False)
+            c = cdsapi.Client(timeout=300,quiet=False)
             c.retrieve(
                 dataset,
                 retrieve_dict(level, month, year, domain),
                 output_filename,
                 )
-            del c
+        except cdsapi.ClientError as e:
+            print(f'Error downloading {site} {level}: {months[month]} {year}')
+            print(e)
         except Exception as e:
             print(f'Error downloading {site} {level}: {months[month]} {year}')
             print(e)
@@ -134,8 +136,10 @@ def retrieve_site_year(level, site, year):
     """
 
     # Run asynchronously. Seems to be a limit of 2 or 3 simultaneous requests?
-    with Pool(2) as pool:
-        pool.starmap(retrieve_site_month, [(site, level, year, month) for month in range(12)])
+    # with Pool(2) as pool:
+    #     pool.starmap(retrieve_site_month, [(site, level, year, month) for month in range(12)])
+    for month in range(12):
+        retrieve_site_month(site, level, year, month)
 
 
 if __name__ == '__main__':

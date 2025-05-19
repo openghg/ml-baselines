@@ -25,4 +25,8 @@ def test_read_intem():
     assert df.index.is_monotonic_increasing, "Timestamps are not in increasing order"
     assert df.index.is_unique, "Timestamps are not unique"
 
-    
+
+    # Check outputting only one year
+    df = read_intem(site, start_year=1990, end_year=1990)
+    assert df.index.min().year == 1990, "Start year is incorrect"
+    assert df.index.max().year == 1990, "End year is incorrect"

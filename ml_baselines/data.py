@@ -14,12 +14,16 @@ package_path = cfg.package_dir
 root_path = cfg.root_dir
 
 
-def read_intem(site):
+def read_intem(site,
+               start_year = None,
+               end_year = None):
     """
     Extracting baseline flags for a given site
 
     Args:
     - site (str): Site code (e.g., MHD)
+    - start_year (int): Start year for the data extraction (inclusive)
+    - end_year (int): End year for the data extraction (inclusive)
 
     Returns:
     - df (pandas.DataFrame): DataFrame with baseline flags as a binary variable
@@ -46,9 +50,15 @@ def read_intem(site):
         # Find all files in archive matching "{site_translator[site]}*.txt"
         files = [zip_ref.extract(file, path=package_path / "data") for file in zip_ref.namelist() if file.startswith(f"{site_translator[site]}") and file.endswith(".txt")]
 
+        # If start_year is not None, filter files by year
+        if start_year is not None:
+            files = [file for file in files if int(file.split("_")[-1][:4]) >= start_year]
+        if end_year is not None:
+            files = [file for file in files if int(file.split("_")[-1][:4]) <= end_year]
+
         for file in files:
             # Read the data, skipping metadata, putting into pandas dataframe
-            data = pd.read_csv(file, skiprows=6, sep='\s+')
+            data = pd.read_csv(file, skiprows=6, sep=r'\s+')
 
             # Setting the index of the dataframe to be the extracted datetime and naming it time
             data.index = pd.to_datetime(data['YY'].astype(str) + "-" + \
