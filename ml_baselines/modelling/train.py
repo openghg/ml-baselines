@@ -1,3 +1,5 @@
+import numpy as np
+import xarray as xr
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -48,7 +50,61 @@ def get_train_test_data(site, test_train):
         raise ValueError(f"Data for {site} has duplicate timestamps in the specified period.")
 
     return df
-    
+
+
+def balance_dataset(df, target_baseline_ratio=0.8):
+
+    # counting number of baseline&non-baseline data points
+    baseline_count = (df['baseline']==1).sum()
+    non_baseline_count = (df['baseline']==0).sum()
+
+    baseline_ratio = baseline_count / (baseline_count + non_baseline_count)
+    non_baseline_ratio = non_baseline_count / (baseline_count + non_baseline_count)
+
+    if baseline_ratio > target_baseline_ratio:
+        print("The dataset already has a higher baseline ratio than the target. No balancing needed.")
+        return df
+
+
+    # calculating the majority class count based on majority_ratio and minority_count
+    majority_count = int(baseline_count * (non_baseline_ratio/baseline_ratio))
+
+    # subsetting the non-baseline data points
+    undersampled_non_baseline = df[df['baseline'] == 0]
+
+
+    #TODO: GOT TO HERE. Everything below this line is not working.
+
+
+
+
+    # creating an array of time indices & randomly selecting some
+    time_indices = undersampled_non_baseline.index
+    selected_indices = np.random.choice(time_indices, majority_count, replace=False)
+    selected_indices = np.sort(selected_indices)
+
+    # setting the non-baseline data points to only include the randomly selected indices
+    undersampled_non_baseline = undersampled_non_baseline.sel(time=selected_indices)
+
+    # combining the the undersampled non-baseline with the baseline values
+    balanced_df = xr.merge([df.sel(time=(df['baseline'] == 1)), undersampled_non_baseline])
+    balanced_df = balanced_df.sortby('time')
+
+    # checking balance
+    new_baseline_count = balanced_df['baseline'].where(balanced_df['baseline']==1).count()
+    new_non_baseline_count = balanced_df['baseline'].where(balanced_df['baseline']==0).count()
+
+    # verifying that the ratio of baseline:non-baseline data points is as expected (within a tolerance of 1%)
+    tolerance = 0.01
+    upper_bound = (1+tolerance)*(majority_ratio/minority_ratio)
+    lower_bound = (1-tolerance)*(majority_ratio/minority_ratio)
+
+    if(lower_bound <= (new_non_baseline_count/new_baseline_count) <= upper_bound):
+        return balanced_df
+    else:
+        raise ValueError("The counts of baseline and non-baseline values are not in the expected ratio.")
+
+
 
 def train_mlp(site):
 
@@ -59,6 +115,7 @@ def train_mlp(site):
     y = df["baseline"]
 
     #TODO: BALANCE DATASET
+    df = balance_dataset(df)
 
     nn_model = MLPClassifier(max_iter=1000, random_state=42,)
 
@@ -106,3 +163,5 @@ def train_mlp(site):
     print(f"F1 Score on Testing Set = {f1_val:.3f}")
 
     return nn_model, X_test, y_test
+
+train_mlp("MHD")
