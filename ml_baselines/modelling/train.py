@@ -1,5 +1,9 @@
 import numpy as np
 import xarray as xr
+import pandas as pd
+from pathlib import Path
+import pickle
+
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -13,7 +17,24 @@ site_coords_dict = cfg.site_coords_dict
 models_path = cfg.models_path
 
 
-def get_train_test_data(site, test_train):
+def get_train_test_data(site, test_train,
+                        balance=False,
+                        return_dataframe=False):
+    """ Get the training, testing or validation data for a given site.
+
+    Args:
+        site (str): The site for which to get the data.
+        test_train (str): The type of data to get. Must be one of 'train', 'test', or 'validation'.
+        balance (bool): If True, balance the dataset by undersampling the majority class.
+        return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
+
+    Returns:
+        pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
+                                If return_dataframe is False, returns a tuple (X, y) where X is the features and y is the target.
+
+    Raises:
+        ValueError: If the test_train argument is not one of 'train', 'test', or 'validation'.
+    """
 
     if test_train == "train":
         start_year = cfg.training_period[site][0]
@@ -49,101 +70,128 @@ def get_train_test_data(site, test_train):
     if not df.index.is_unique:
         raise ValueError(f"Data for {site} has duplicate timestamps in the specified period.")
 
-    return df
+    if balance:
+        # If balance is True, balance the dataset
+        df = balance_dataset(df)
+
+    if return_dataframe:
+        return df
+    else:
+        # Split the data into features and target
+        X = df.drop(columns=["baseline"])
+        y = df["baseline"]
+        return X, y
 
 
 def balance_dataset(df, target_baseline_ratio=0.8):
+    """ Balance the dataset by undersampling the majority class (baseline or non-baseline) to achieve a target ratio.
+    
+    Args:
+        df (pd.DataFrame): The input DataFrame containing a 'baseline' column with values 0 or 1.
+        target_baseline_ratio (float): The desired ratio of baseline (1) to non-baseline (0) values in the output DataFrame.
+        
+    Returns:
+        pd.DataFrame: A balanced DataFrame with the specified ratio of baseline to non-baseline values.
+    
+    Raises:
+        ValueError: If the input DataFrame does not contain a 'baseline' column or if the target ratio is not between 0 and 1.
+    """
+
+    def undersample(df,
+                    majority_indices_to_subsample,
+                    minority_indices,
+                    target_majority_ratio,
+                    majority_count,
+                    minority_count):
+        undersample_ratio = target_majority_ratio * minority_count / \
+                            (majority_count * (1 - target_majority_ratio))
+        # Randomly sample the majority values
+        sampled_majority_indices = np.random.choice(majority_indices_to_subsample,
+                                                    size=int(undersample_ratio * majority_count),
+                                                    replace=False)
+        df_balanced = df.loc[sampled_majority_indices]
+
+        # Add the minority values
+        return pd.concat([df_balanced, df.loc[minority_indices]])
+
+    if 'baseline' not in df.columns:
+        raise ValueError("Input DataFrame must contain a 'baseline' column.")
+
+    if not (0 <= target_baseline_ratio <= 1):
+        raise ValueError("Target baseline ratio must be between 0 and 1.")
 
     # counting number of baseline&non-baseline data points
     baseline_count = (df['baseline']==1).sum()
     non_baseline_count = (df['baseline']==0).sum()
 
     baseline_ratio = baseline_count / (baseline_count + non_baseline_count)
-    non_baseline_ratio = non_baseline_count / (baseline_count + non_baseline_count)
 
+    # If there are too many baseline values, we need to undersample them
     if baseline_ratio > target_baseline_ratio:
-        print("The dataset already has a higher baseline ratio than the target. No balancing needed.")
-        return df
 
+        df_balanced = undersample(df,
+                                  df[df['baseline'] == 1].index,
+                                  df[df['baseline'] == 0].index,
+                                  target_baseline_ratio,
+                                  baseline_count,
+                                  non_baseline_count)
 
-    # calculating the majority class count based on majority_ratio and minority_count
-    majority_count = int(baseline_count * (non_baseline_ratio/baseline_ratio))
-
-    # subsetting the non-baseline data points
-    undersampled_non_baseline = df[df['baseline'] == 0]
-
-
-    #TODO: GOT TO HERE. Everything below this line is not working.
-
-
-
-
-    # creating an array of time indices & randomly selecting some
-    time_indices = undersampled_non_baseline.index
-    selected_indices = np.random.choice(time_indices, majority_count, replace=False)
-    selected_indices = np.sort(selected_indices)
-
-    # setting the non-baseline data points to only include the randomly selected indices
-    undersampled_non_baseline = undersampled_non_baseline.sel(time=selected_indices)
-
-    # combining the the undersampled non-baseline with the baseline values
-    balanced_df = xr.merge([df.sel(time=(df['baseline'] == 1)), undersampled_non_baseline])
-    balanced_df = balanced_df.sortby('time')
-
-    # checking balance
-    new_baseline_count = balanced_df['baseline'].where(balanced_df['baseline']==1).count()
-    new_non_baseline_count = balanced_df['baseline'].where(balanced_df['baseline']==0).count()
-
-    # verifying that the ratio of baseline:non-baseline data points is as expected (within a tolerance of 1%)
-    tolerance = 0.01
-    upper_bound = (1+tolerance)*(majority_ratio/minority_ratio)
-    lower_bound = (1-tolerance)*(majority_ratio/minority_ratio)
-
-    if(lower_bound <= (new_non_baseline_count/new_baseline_count) <= upper_bound):
-        return balanced_df
     else:
-        raise ValueError("The counts of baseline and non-baseline values are not in the expected ratio.")
+        # If there are too many non-baseline values, we need to undersample them
+        df_balanced = undersample(df,
+                                  df[df['baseline'] == 0].index,
+                                  df[df['baseline'] == 1].index,
+                                  1 - target_baseline_ratio,
+                                  non_baseline_count,
+                                  baseline_count)
+
+    # Shuffle the DataFrame
+    df_balanced = df_balanced.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    return df_balanced
 
 
+def train_mlp(site,
+            random_state=42,
+            hidden_layer_sizes=(50,), 
+            shuffle=False,
+            activation='relu', 
+            solver='adam', 
+            alpha=0.0001, 
+            learning_rate='constant', 
+            batch_size=100, 
+            early_stopping=True,
+            learning_rate_init=0.0001,
+            beta_2=0.9,):
 
-def train_mlp(site):
+    # Get the training data
+    print(f"Training MLP model for site: {site}")
+    X, y = get_train_test_data(site, "train", balance=True)
 
-    df = get_train_test_data(site, "train")
+    nn_model = MLPClassifier(max_iter=1000,
+                            random_state=random_state,
+                            hidden_layer_sizes=hidden_layer_sizes, 
+                            shuffle=shuffle,
+                            activation=activation, 
+                            solver=solver,
+                            alpha=alpha, 
+                            learning_rate=learning_rate,
+                            batch_size=batch_size, 
+                            early_stopping=early_stopping,
+                            learning_rate_init=learning_rate_init,
+                            beta_2=beta_2)
 
-    # Split the data into features and target
-    X = df.drop(columns=["baseline"])
-    y = df["baseline"]
-
-    #TODO: BALANCE DATASET
-    df = balance_dataset(df)
-
-    nn_model = MLPClassifier(max_iter=1000, random_state=42,)
-
-    # Hyperparameters from Kirstin's model:
-    # nn_model = MLPClassifier(max_iter=1000, random_state=42,
-    #                     hidden_layer_sizes=(100,), 
-    #                     shuffle=False,
-    #                     activation='relu', 
-    #                     solver='adam', 
-    #                     alpha=0.0001, 
-    #                     learning_rate='constant', 
-    #                     batch_size=100, 
-    #                     early_stopping=False,
-    #                     learning_rate_init=0.0001,
-    #                     beta_2=0.9,)
     # Fit the model
+    print("... fitting")
     nn_model.fit(X, y)
 
     # Validation
-    df_val = get_train_test_data(site, "validation")
-    X_val = df_val.drop(columns=["baseline"])
-    y_val = df_val["baseline"]
+    X_val, y_val = get_train_test_data(site, "validation")
 
     # Testing
-    df_test = get_train_test_data(site, "test")
-    X_test = df_test.drop(columns=["baseline"])
-    y_test = df_test["baseline"]
+    X_test, y_test = get_train_test_data(site, "test")
 
+    print("... predicting")
     y_pred_val = nn_model.predict(X_val)
     y_pred_train = nn_model.predict(X)
 
@@ -164,4 +212,65 @@ def train_mlp(site):
 
     return nn_model, X_test, y_test
 
-train_mlp("MHD")
+
+def train_mlp_grid_search(site, param_grid=None):
+    """ Train a MLP model using grid search for hyperparameter tuning.
+
+    Args:
+        site (str): The site for which to train the model.
+        param_grid (dict, optional): A dictionary containing the hyperparameters to tune. If None, default values are used.
+
+    Returns:
+        GridSearchCV: The trained model with the best hyperparameters.
+    """
+    
+    X_train, y_train = get_train_test_data(site, "train", balance=True)
+
+    if param_grid is None:
+        param_grid = {
+            'hidden_layer_sizes': [(50,50,50), (50,100,50), (100,)],
+            'activation': ['tanh', 'relu'],
+            'solver': ['sgd', 'adam'],
+            'alpha': [0.0001, 0.05],
+            'learning_rate': ['constant','adaptive'],
+            'batch_size': [100, 200, 300],
+            'max_iter': [1000, 2000],
+            'early_stopping': [True, False]
+        }
+
+    grid_search = GridSearchCV(
+        MLPClassifier(random_state=42),
+        param_grid,
+        scoring='f1',
+        cv=5,
+        verbose=2,
+        n_jobs=-1
+    )
+
+    print(f"Training MLP model for site: {site} with grid search...")
+    grid_search.fit(X_train, y_train)
+
+    print("Best parameters found: ", grid_search.best_params_)
+    print("Best score: ", grid_search.best_score_)
+
+    # Validation
+    X_val, y_val = get_train_test_data(site, "validation")
+    y_pred_val = grid_search.predict(X_val)
+
+    precision_val = precision_score(y_val, y_pred_val)
+    recall_val = recall_score(y_val, y_pred_val)
+    f1_val = f1_score(y_val, y_pred_val)
+
+    # Save the best model
+    best_model = grid_search.best_estimator_
+    best_model_path = Path(models_path) / f"{site}_mlp_best_model.pkl"
+    with open(best_model_path, 'wb') as f:
+        pickle.dump(best_model, f)
+
+    pass
+
+    return grid_search
+
+# train_mlp_grid_search("MHD", param_grid = {
+#             'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
+#             'activation': ['tanh', 'relu'],})
