@@ -306,4 +306,4 @@ def open_features(site,
 
 if __name__ == "__main__":
     # Example usage
-    preprocess_all_features()
+    preprocess_all_features(force=True)

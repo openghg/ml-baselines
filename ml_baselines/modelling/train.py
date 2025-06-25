@@ -19,7 +19,8 @@ models_path = cfg.models_path
 
 def get_train_test_data(site, test_train,
                         balance=False,
-                        return_dataframe=False):
+                        return_dataframe=False,
+                        undersample=False):
     """ Get the training, testing or validation data for a given site.
 
     Args:
@@ -73,6 +74,13 @@ def get_train_test_data(site, test_train,
     if balance:
         # If balance is True, balance the dataset
         df = balance_dataset(df)
+
+    if undersample:
+        # Randomly undersample the dataset
+        # First shuffle the DataFrame
+        df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+        # Then, just keep the first "undersample" rows
+        df = df.iloc[:undersample]
 
     if return_dataframe:
         return df
@@ -153,20 +161,18 @@ def balance_dataset(df, target_baseline_ratio=0.8):
 
 def train_mlp(site,
             random_state=42,
-            hidden_layer_sizes=(50,), 
+            hidden_layer_sizes=(100,), 
             shuffle=False,
             activation='relu', 
             solver='adam', 
             alpha=0.0001, 
             learning_rate='constant', 
             batch_size=100, 
-            early_stopping=True,
-            learning_rate_init=0.0001,
-            beta_2=0.9,):
+            early_stopping=False):
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=True)
+    X, y = get_train_test_data(site, "train", balance=True, undersample=2000)
 
     nn_model = MLPClassifier(max_iter=1000,
                             random_state=random_state,
@@ -177,9 +183,7 @@ def train_mlp(site,
                             alpha=alpha, 
                             learning_rate=learning_rate,
                             batch_size=batch_size, 
-                            early_stopping=early_stopping,
-                            learning_rate_init=learning_rate_init,
-                            beta_2=beta_2)
+                            early_stopping=early_stopping)
 
     # Fit the model
     print("... fitting")
@@ -241,7 +245,7 @@ def train_mlp_grid_search(site, param_grid=None):
     grid_search = GridSearchCV(
         MLPClassifier(random_state=42),
         param_grid,
-        scoring='f1',
+        scoring='precision',
         cv=5,
         verbose=2,
         n_jobs=-1
@@ -271,6 +275,4 @@ def train_mlp_grid_search(site, param_grid=None):
 
     return grid_search
 
-# train_mlp_grid_search("MHD", param_grid = {
-#             'hidden_layer_sizes': [(50, 50, 50), (50, 100, 50), (100,)],
-#             'activation': ['tanh', 'relu'],})
+#train_mlp_grid_search("MHD", param_grid = None)
