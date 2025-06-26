@@ -77,7 +77,8 @@ lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0,
 lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
 
 # Define the time coordinate in the met files
-time_coord = "valid_time"
+# time_coord = "valid_time"
+time_coord = "time"
 
 
 def preprocess_features(site, year, force=False):
@@ -143,9 +144,11 @@ def preprocess_features(site, year, force=False):
             with xr.open_dataset(f) as ds:
                 # Extract the variable and interpolate the data onto the grid
                 if var["level"] is not None:
-                    data_slice = ds.sel(pressure_level=var["level"])
+                    # data_slice = ds.sel(pressure_level=var["level"])
+                    data_slice = ds.sel(level=var["level"])
                     # Drop the pressure_level coordinate
-                    data_slice = data_slice.drop_vars(["pressure_level"])
+                    # data_slice = data_slice.drop_vars(["pressure_level"])
+                    data_slice = data_slice.drop_vars(["level"])
                 else:
                     data_slice = ds
 
@@ -164,7 +167,7 @@ def preprocess_features(site, year, force=False):
         ds_var = xr.concat(data, dim=time_coord)
 
         # Rename the time dimension to 'time'
-        ds_var = ds_var.rename({time_coord: "time"})
+        # ds_var = ds_var.rename({time_coord: "time"})
 
         # If the variable has a level coordinate, rename
         if var["level"] is not None:
@@ -306,4 +309,4 @@ def open_features(site,
 
 if __name__ == "__main__":
     # Example usage
-    preprocess_all_features(force=True)
+    preprocess_all_features(force=False)
