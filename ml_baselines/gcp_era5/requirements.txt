@@ -1,0 +1,5 @@
+xarray
+numpy
+gcsfs
+zarr
+netcdf4
