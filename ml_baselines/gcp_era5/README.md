@@ -31,7 +31,10 @@ Set up GCP Cloud Run **Job** using appropriate resources (X Gb).
 
 Run using:
 
-gcloud run jobs execute gcp-era5 \
-    --region=us-central1 \
-    --args='MHD,1978'
+gcloud run jobs execute gcp-era5 --region=us-central1 --args='MHD,1978'
 
+Or in a loop:
+
+for year in {1979..2024}; do
+   gcloud run jobs execute gcp-era5 --region=us-central1 --args='MHD,'"$year"
+done
