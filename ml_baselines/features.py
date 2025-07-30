@@ -9,7 +9,7 @@ from ml_baselines.config import Config
 
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
-met_path = Path(cfg.data_path + "/meteorological_data/ECMWF")
+met_path = Path(cfg.data_path + "/meteorological_data")
 models_path = Path(cfg.models_path)
 
 # Define variables to be extracted
@@ -99,7 +99,7 @@ def preprocess_features(site, year, force=False):
     """
 
     # Path to the data
-    data_path = met_path / site.upper()
+    data_path = met_path / "ECMWF" / site.upper()
 
     output_filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
 
@@ -234,6 +234,109 @@ def preprocess_features(site, year, force=False):
     print(f"Preprocessed features for {site} in {year} and saved to {output_filename}")
 
 
+def preprocess_features_arco_era5(site, force=False):
+    """Preprocesses the meteorological data for a given site.
+
+    Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
+    The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
+    The processed data will be saved to a netCDF file in the models_path / features directory.
+    The file will be named features_<site>_<year>.nc.
+    The data will be saved in the following format:
+        - time: time coordinate
+        - points: grid points
+        - variables: meteorological variables (e.g., temperature, humidity, wind speed)
+
+    Args:
+        site (str): Site code.
+        force (bool): If True, force reprocessing even if the file already exists.
+    """
+
+    # Path to the data
+    data_path = met_path / "arco-era5"
+
+    files = sorted((data_path).glob(f"era5*{site.upper()}*.nc"))
+
+    if len(list(files)) == 0:
+        raise ValueError(f"No files found for {site}.")
+    
+    # Check if every year between the first and last year is present
+    years = [int(f.name.split("-")[-1][:4]) for f in files]
+    for year in range(min(years), max(years)+1):
+        if year not in years:
+            print(f"WARNING: Year {year} is missing for {site}.")
+
+    ds = xr.open_mfdataset(files, combine="by_coords")
+
+    # u_component_of_wind and v_component_of_wind are at 500hPh and 850hPa levels
+    # Flatten these variables into single variables with level suffixes
+    for level in [500, 850]:
+        ds[f"u{level}"] = ds[f"u_component_of_wind"].sel(levels=level)
+        ds[f"v{level}"] = ds[f"v_component_of_wind"].sel(levels=level)
+    ds = ds.drop_vars(["u_component_of_wind", "v_component_of_wind", "levels"])
+
+    # Simplify variable names for consistency with previous code
+    ds = ds.rename({
+        "surface_pressure": "sp",
+        "boundary_layer_height": "blh",
+        "10m_u_component_of_wind": "u10",
+        "10m_v_component_of_wind": "v10"})
+
+    # Find duplicate times and drop the first occurrence of each duplicate
+    if ds.indexes["time"].duplicated().any():
+        ds = ds.sel(time=~ds.indexes["time"].duplicated())
+
+    dfs = []
+
+    # For each variable, pivot the (time, points) array into a wide-form DataFrame
+    # Use the variables defined in the variables dict to ensure consistency
+    for var in variables.keys():
+        # Convert the DataArray for a variable to a DataFrame and pivot so that each grid point becomes a separate column
+        df_var = (
+            ds[var]
+            .to_dataframe()
+            .reset_index()
+            .pivot(index="time", columns="points", values=var)
+        )
+        # Rename columns to include the variable name (e.g., sp_0, sp_1, etc.)
+        df_var.columns = [f"{var}_{int(pt)}" for pt in df_var.columns]
+        dfs.append(df_var)
+
+    # Merge all variable-wise DataFrames on the time index
+    df = pd.concat(dfs, axis=1)
+
+    # Sort by time index
+    if not df.index.is_monotonic_increasing:
+        df = df.sort_index()
+    # Add the time index as a column
+    df = df.reset_index()
+
+    for year in years:
+        output_filename = models_path / "features" / f"features-arco-era5_{site}_{year}.csv.gz"
+        if output_filename.exists() and not force:
+            print(f"Skipping {output_filename}, already exists.")
+            continue
+
+        df_year = df[(df["time"] >= pd.Timestamp(f"{year}-01-01")) & (df["time"] < pd.Timestamp(f"{year+1}-01-01"))]
+
+        with gzip.open(output_filename, "wt") as f:
+            f.write("# Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines\n")
+            f.write("# Data is interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest\n")
+            f.write("# Column names have the following format:\n")
+            f.write("# - the text before the first underscore is the variable name\n")
+            f.write("# - the text after the first underscore is the grid point number\n")
+            f.write("# - the text after the (optional) second underscore is the time shift\n")
+            f.write(f"# Processed by: {getpass.getuser()}\n")
+            f.write(f"# Processed on: {pd.Timestamp.now()}\n")
+            f.write(f"# Processed by ml-baselines code\n")
+            f.write(f"# Site: {site}\n")
+            f.write(f"# Year: {year}\n")
+    
+            # Save the DataFrame to a CSV file
+            df_year.to_csv(f, index=False, header=True, mode="a")
+
+        print(f"Preprocessed features for {site} in {year} and saved to {output_filename}")
+
+
 def preprocess_all_features(start_year=1978, end_year=2024, force=False):
     """Preprocesses the meteorological data for all sites and years."""
     for site in site_coords_dict.keys():
@@ -243,6 +346,17 @@ def preprocess_all_features(start_year=1978, end_year=2024, force=False):
             except Exception as e:
                 print(f"Error processing {site} in {year}: {e}")
                 continue
+    print("Preprocessing complete.")
+
+
+def preprocess_all_features_arco_era5(force=False):
+    """Preprocesses the meteorological data for all sites and years."""
+    for site in site_coords_dict.keys():
+        try:
+            preprocess_features_arco_era5(site, force=force)
+        except Exception as e:
+            print(f"Error processing {site}: {e}")
+            continue
     print("Preprocessing complete.")
 
 
@@ -306,4 +420,4 @@ def open_features(site,
 
 if __name__ == "__main__":
     # Example usage
-    preprocess_all_features(force=True)
+    preprocess_all_features_arco_era5(force=True)
