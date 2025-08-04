@@ -4,36 +4,24 @@ import gcsfs
 import tempfile
 import argparse
 
+from ml_baselines.config import Config
+from ml_baselines.utils import longitude_to_360
 
-site_coords_dict = {
-        "MHD":[53.3267, -9.9046], 
-        "RPB":[13.1651, -59.4321], 
-        "CGO":[-40.6833, 144.6894], 
-        "GSN":[33.2924, 126.1616],
-        "JFJ":[46.547767, 7.985883], 
-        "CMN":[44.1932, 10.7014], 
-        "THD":[41.0541, -124.151], 
-        "ZEP":[78.9072, 11.8867],
-        "SMO": [-14.2474, -170.5644]
-    }
+cfg = Config()
+site_coords_dict = cfg.site_coords_dict
 
-lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
-lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
+lons_grid = cfg.lons_grid
+lats_grid = cfg.lats_grid
 
 arco_era5_location = 'gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3'
+
+gcp_bucket_name = "ml-baselines-era5"
 
 levels = [850, 500]
 
 variables_3d = ["u_component_of_wind", "v_component_of_wind"]
 variables_2d = ["10m_u_component_of_wind", "10m_v_component_of_wind",
                 "surface_pressure", "boundary_layer_height"]
-
-
-def longitude_to_360(lons):
-    """
-    Convert longitudes to 0-360 range.
-    """
-    return np.where(lons < 0, lons + 360, lons)
 
 
 def retrieve_grid(arco_era5_location):
@@ -206,7 +194,7 @@ def run(site, year):
 
     ds_points = get(year, lats, lons, levels)
 
-    save_to_bucket(ds_points, "ml-baselines-era5", f"era5-{site}-{year}.nc")
+    save_to_bucket(ds_points, gcp_bucket_name, f"era5-{site}-{year}.nc")
 
 
 if __name__ == "__main__":

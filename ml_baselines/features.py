@@ -12,76 +12,16 @@ site_coords_dict = cfg.site_coords_dict
 met_path = Path(cfg.data_path + "/meteorological_data")
 models_path = Path(cfg.models_path)
 
-# Define variables to be extracted
-variables = {
-        "sp": {
-            "file": "single_level",
-            "var_in_file": "sp",
-            "level": None,
-            "units": "hPa",
-            "long_name": "Surface Pressure",
-        },
-        "blh": {
-            "file": "single_level",
-            "var_in_file": "blh",
-            "level": None,
-            "units": "m",
-            "long_name": "Boundary Layer Height",
-        },
-        "u10": {
-            "file": "single_level",
-            "var_in_file": "u10",
-            "level": None,
-            "units": "m/s",
-            "long_name": "10m U-component of Wind",
-        },
-        "v10": {
-            "file": "single_level",
-            "var_in_file": "v10",
-            "level": None,
-            "units": "m/s",
-            "long_name": "10m V-component of Wind",
-        },
-        "u850": {
-            "file": "pressure_levels",
-            "var_in_file": "u",
-            "level": 850,
-            "units": "m/s",
-            "long_name": "850hPa U-component of Wind",
-        },
-        "v850": {
-            "file": "pressure_levels",
-            "var_in_file": "v",
-            "level": 850,
-            "units": "m/s",
-            "long_name": "850hPa V-component of Wind",
-        },
-        "u500": {
-            "file": "pressure_levels",
-            "var_in_file": "u",
-            "level": 500,
-            "units": "m/s",
-            "long_name": "500hPa U-component of Wind",
-        },
-        "v500": {
-            "file": "pressure_levels",
-            "var_in_file": "v",
-            "level": 500,
-            "units": "m/s",
-            "long_name": "500hPa V-component of Wind",
-        },
-    }
-
-# Define the grid system
-lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
-lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
+lats_grid = cfg.lats_grid
+lons_grid = cfg.lons_grid
+variables = cfg.met_variables
 
 # Define the time coordinate in the met files
 time_coord = "valid_time"
 
 
 def preprocess_features(site, year, force=False):
-    """Preprocesses the meteorological data for a given site.
+    """Preprocesses the meteorological data for a given site using slices of ERA5 from the CDS API.
 
     Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
     The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
@@ -235,22 +175,16 @@ def preprocess_features(site, year, force=False):
 
 
 def preprocess_features_arco_era5(site, force=False):
-    """Preprocesses the meteorological data for a given site.
+    """Preprocess features that have been extracted from the ARCO ERA5 reanalysis data.
 
-    Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
-    The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
-    The processed data will be saved to a netCDF file in the models_path / features directory.
-    The file will be named features_<site>_<year>.nc.
-    The data will be saved in the following format:
-        - time: time coordinate
-        - points: grid points
-        - variables: meteorological variables (e.g., temperature, humidity, wind speed)
+    These files should have already undergone some preprocessing (see gcp_era5 container), including 
+    interpolation onto a grid with +/- 5 and 10 degrees latitude and longitude
 
     Args:
         site (str): Site code.
         force (bool): If True, force reprocessing even if the file already exists.
     """
-
+    
     # Path to the data
     data_path = met_path / "arco-era5"
 
@@ -266,6 +200,22 @@ def preprocess_features_arco_era5(site, force=False):
             print(f"WARNING: Year {year} is missing for {site}.")
 
     ds = xr.open_mfdataset(files, combine="by_coords")
+
+    # Check that the dataset has the expected coordinates
+    if "points" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the 'points' coordinate. Please check the data.")
+    if "latitude" not in ds.coords or "longitude" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the expected latitude or longitude coordinates. Please check the data.")
+    if "levels" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the 'levels' coordinate. Please check the data.")
+
+    # Check that grid points are ordered the same way as the lons_grid and lats_grid dataArray
+    if not np.allclose(lats_grid + ds.latitude.values[0], ds.latitude.values, rtol=0.1):
+        raise ValueError("Extracted points are not aligned with expected grid latitude points")
+    lons_expected = lons_grid + ds.longitude.values[0]
+
+    if not np.allclose(lons_expected, ds.longitude.values, rtol=0.1):
+        raise ValueError("Extracted points are not aligned with expected grid longitude points")
 
     # u_component_of_wind and v_component_of_wind are at 500hPh and 850hPa levels
     # Flatten these variables into single variables with level suffixes
@@ -419,5 +369,8 @@ def open_features(site,
 
 
 if __name__ == "__main__":
-    # Example usage
-    preprocess_all_features_arco_era5(force=True)
+
+    if cfg.met_type == "arco-era5":
+        preprocess_all_features_arco_era5(force=True)
+    else:
+        preprocess_all_features(force=True)

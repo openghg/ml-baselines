@@ -5,12 +5,12 @@ WORKDIR /app
 RUN mkdir -p /app/output
 
 # Install dependencies
-COPY requirements.txt ./
+COPY docker/gcp_era5/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy your script and any needed files
-COPY get_gcp_era5.py ./
+COPY ml_baselines ./ml_baselines
 
 # Set the default command to run your script
-ENTRYPOINT ["python", "get_gcp_era5.py"]
+ENTRYPOINT ["python", "-m", "ml_baselines.met_retrieve.get_gcp_era5"]
 CMD ["MHD", "1978"]
