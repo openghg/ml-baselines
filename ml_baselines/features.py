@@ -6,6 +6,7 @@ import getpass
 import gzip
 
 from ml_baselines.config import Config
+from ml_baselines.utils import longitude_to_360
 
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
@@ -214,7 +215,8 @@ def preprocess_features_arco_era5(site, force=False):
         raise ValueError("Extracted points are not aligned with expected grid latitude points")
     lons_expected = lons_grid + ds.longitude.values[0]
 
-    if not np.allclose(lons_expected, ds.longitude.values, rtol=0.1):
+    if not np.allclose(longitude_to_360(lons_expected),
+                       longitude_to_360(ds.longitude.values), rtol=0.1):
         raise ValueError("Extracted points are not aligned with expected grid longitude points")
 
     # u_component_of_wind and v_component_of_wind are at 500hPh and 850hPa levels
@@ -268,7 +270,7 @@ def preprocess_features_arco_era5(site, force=False):
 
         df_year = df[(df["time"] >= pd.Timestamp(f"{year}-01-01")) & (df["time"] < pd.Timestamp(f"{year+1}-01-01"))]
 
-        with gzip.open(output_filename, "wt") as f:
+        with gzip.open(output_filename, "wt", compresslevel=6) as f:
             f.write("# Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines\n")
             f.write("# Data is interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest\n")
             f.write("# Column names have the following format:\n")
@@ -324,7 +326,11 @@ def open_features(site,
         pd.DataFrame: Preprocessed features for the site.
     """
 
-    files = [models_path / "features" / f"features_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
+    features_str = "-arco-era5" if cfg.met_type == "arco-era5" else ""
+
+    expected_columns = [key + f"_{i}" for key in cfg.met_variables.keys() for i in range(17)]
+
+    files = [models_path / "features" / f"features{features_str}_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
 
     for f in files:
         if not f.exists():
@@ -352,6 +358,14 @@ def open_features(site,
                     missing_months = list(missing_months.where(missing_months > 0, drop=True).index)
                     raise ValueError(f"Missing data for {var} in {site}, month {', '.join([str(m) for m in missing_months])}")
 
+        # Check for correct columns in the right order
+        if list(df.columns) != expected_columns:
+            # Check if it's the order that is different
+            if sorted(df.columns) == sorted(expected_columns):
+                raise ValueError(f"Incorrect column order in file {f} . Please check the data.")
+            else:
+                raise ValueError(f"Incorrect columns in file {f} . Please check the data.")
+
         dfs.append(df)
 
     df = pd.concat(dfs, axis=0)
@@ -364,6 +378,9 @@ def open_features(site,
 
     # Merge the current and past dataframes on their time index
     df_final = pd.merge(df, df_past, left_index=True, right_index=True, how="left")
+
+    # Add hour of day column
+    df_final["hour_of_day"] = df_final.index.hour
 
     return df_final
 
