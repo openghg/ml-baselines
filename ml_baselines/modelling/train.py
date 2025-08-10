@@ -18,7 +18,7 @@ models_path = cfg.models_path
 
 
 def get_train_test_data(site, test_train,
-                        balance=False,
+                        balance=True,
                         return_dataframe=False,
                         undersample=False):
     """ Get the training, testing or validation data for a given site.
@@ -168,22 +168,23 @@ def train_mlp(site,
             alpha=0.0001, 
             learning_rate='constant', 
             batch_size=100, 
-            early_stopping=False):
+            early_stopping=False,
+            max_iter=1000):
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
     X, y = get_train_test_data(site, "train", balance=True, undersample=2000)
 
-    nn_model = MLPClassifier(max_iter=1000,
-                            random_state=random_state,
+    nn_model = MLPClassifier(random_state=random_state,
                             hidden_layer_sizes=hidden_layer_sizes, 
                             shuffle=shuffle,
                             activation=activation, 
                             solver=solver,
                             alpha=alpha, 
                             learning_rate=learning_rate,
-                            batch_size=batch_size, 
-                            early_stopping=early_stopping)
+                            batch_size=batch_size,
+                            early_stopping=early_stopping,
+                            max_iter=max_iter)
 
     # Fit the model
     print("... fitting")
@@ -245,7 +246,7 @@ def train_mlp_grid_search(site, param_grid=None):
     grid_search = GridSearchCV(
         MLPClassifier(random_state=42),
         param_grid,
-        scoring='precision',
+        scoring='f1',
         cv=5,
         verbose=2,
         n_jobs=-1

@@ -6,82 +6,23 @@ import getpass
 import gzip
 
 from ml_baselines.config import Config
+from ml_baselines.utils import longitude_to_360
 
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
-met_path = Path(cfg.data_path + "/meteorological_data/ECMWF")
+met_path = Path(cfg.data_path + "/meteorological_data")
 models_path = Path(cfg.models_path)
 
-# Define variables to be extracted
-variables = {
-        "sp": {
-            "file": "single_level",
-            "var_in_file": "sp",
-            "level": None,
-            "units": "hPa",
-            "long_name": "Surface Pressure",
-        },
-        "blh": {
-            "file": "single_level",
-            "var_in_file": "blh",
-            "level": None,
-            "units": "m",
-            "long_name": "Boundary Layer Height",
-        },
-        "u10": {
-            "file": "single_level",
-            "var_in_file": "u10",
-            "level": None,
-            "units": "m/s",
-            "long_name": "10m U-component of Wind",
-        },
-        "v10": {
-            "file": "single_level",
-            "var_in_file": "v10",
-            "level": None,
-            "units": "m/s",
-            "long_name": "10m V-component of Wind",
-        },
-        "u850": {
-            "file": "pressure_levels",
-            "var_in_file": "u",
-            "level": 850,
-            "units": "m/s",
-            "long_name": "850hPa U-component of Wind",
-        },
-        "v850": {
-            "file": "pressure_levels",
-            "var_in_file": "v",
-            "level": 850,
-            "units": "m/s",
-            "long_name": "850hPa V-component of Wind",
-        },
-        "u500": {
-            "file": "pressure_levels",
-            "var_in_file": "u",
-            "level": 500,
-            "units": "m/s",
-            "long_name": "500hPa U-component of Wind",
-        },
-        "v500": {
-            "file": "pressure_levels",
-            "var_in_file": "v",
-            "level": 500,
-            "units": "m/s",
-            "long_name": "500hPa V-component of Wind",
-        },
-    }
-
-# Define the grid system
-lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
-lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
+lats_grid = cfg.lats_grid
+lons_grid = cfg.lons_grid
+variables = cfg.met_variables
 
 # Define the time coordinate in the met files
 time_coord = "valid_time"
 
 
 def preprocess_features(site, year, force=False):
-    """Preprocesses the meteorological data for a given site.
+    """Preprocesses the meteorological data for a given site using slices of ERA5 from the CDS API.
 
     Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
     The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
@@ -99,7 +40,7 @@ def preprocess_features(site, year, force=False):
     """
 
     # Path to the data
-    data_path = met_path / site.upper()
+    data_path = met_path / "ECMWF" / site.upper()
 
     output_filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
 
@@ -234,6 +175,120 @@ def preprocess_features(site, year, force=False):
     print(f"Preprocessed features for {site} in {year} and saved to {output_filename}")
 
 
+def preprocess_features_arco_era5(site, force=False):
+    """Preprocess features that have been extracted from the ARCO ERA5 reanalysis data.
+
+    These files should have already undergone some preprocessing (see gcp_era5 container), including 
+    interpolation onto a grid with +/- 5 and 10 degrees latitude and longitude
+
+    Args:
+        site (str): Site code.
+        force (bool): If True, force reprocessing even if the file already exists.
+    """
+    
+    # Path to the data
+    data_path = met_path / "arco-era5"
+
+    files = sorted((data_path).glob(f"era5*{site.upper()}*.nc"))
+
+    if len(list(files)) == 0:
+        raise ValueError(f"No files found for {site}.")
+    
+    # Check if every year between the first and last year is present
+    years = [int(f.name.split("-")[-1][:4]) for f in files]
+    for year in range(min(years), max(years)+1):
+        if year not in years:
+            print(f"WARNING: Year {year} is missing for {site}.")
+
+    ds = xr.open_mfdataset(files, combine="by_coords")
+
+    # Check that the dataset has the expected coordinates
+    if "points" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the 'points' coordinate. Please check the data.")
+    if "latitude" not in ds.coords or "longitude" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the expected latitude or longitude coordinates. Please check the data.")
+    if "levels" not in ds.coords:
+        raise ValueError(f"Dataset for {site} does not have the 'levels' coordinate. Please check the data.")
+
+    # Check that grid points are ordered the same way as the lons_grid and lats_grid dataArray
+    if not np.allclose(lats_grid + ds.latitude.values[0], ds.latitude.values, rtol=0.1):
+        raise ValueError("Extracted points are not aligned with expected grid latitude points")
+    lons_expected = lons_grid + ds.longitude.values[0]
+
+    if not np.allclose(longitude_to_360(lons_expected),
+                       longitude_to_360(ds.longitude.values), rtol=0.1):
+        raise ValueError("Extracted points are not aligned with expected grid longitude points")
+
+    # u_component_of_wind and v_component_of_wind are at 500hPh and 850hPa levels
+    # Flatten these variables into single variables with level suffixes
+    for level in [500, 850]:
+        ds[f"u{level}"] = ds[f"u_component_of_wind"].sel(levels=level)
+        ds[f"v{level}"] = ds[f"v_component_of_wind"].sel(levels=level)
+    ds = ds.drop_vars(["u_component_of_wind", "v_component_of_wind", "levels"])
+
+    # Simplify variable names for consistency with previous code
+    ds = ds.rename({
+        "surface_pressure": "sp",
+        "boundary_layer_height": "blh",
+        "10m_u_component_of_wind": "u10",
+        "10m_v_component_of_wind": "v10"})
+
+    # Find duplicate times and drop the first occurrence of each duplicate
+    if ds.indexes["time"].duplicated().any():
+        ds = ds.sel(time=~ds.indexes["time"].duplicated())
+
+    dfs = []
+
+    # For each variable, pivot the (time, points) array into a wide-form DataFrame
+    # Use the variables defined in the variables dict to ensure consistency
+    for var in variables.keys():
+        # Convert the DataArray for a variable to a DataFrame and pivot so that each grid point becomes a separate column
+        df_var = (
+            ds[var]
+            .to_dataframe()
+            .reset_index()
+            .pivot(index="time", columns="points", values=var)
+        )
+        # Rename columns to include the variable name (e.g., sp_0, sp_1, etc.)
+        df_var.columns = [f"{var}_{int(pt)}" for pt in df_var.columns]
+        dfs.append(df_var)
+
+    # Merge all variable-wise DataFrames on the time index
+    df = pd.concat(dfs, axis=1)
+
+    # Sort by time index
+    if not df.index.is_monotonic_increasing:
+        df = df.sort_index()
+    # Add the time index as a column
+    df = df.reset_index()
+
+    for year in years:
+        output_filename = models_path / "features" / f"features-arco-era5_{site}_{year}.csv.gz"
+        if output_filename.exists() and not force:
+            print(f"Skipping {output_filename}, already exists.")
+            continue
+
+        df_year = df[(df["time"] >= pd.Timestamp(f"{year}-01-01")) & (df["time"] < pd.Timestamp(f"{year+1}-01-01"))]
+
+        with gzip.open(output_filename, "wt", compresslevel=6) as f:
+            f.write("# Subset of the ECMWF ERA5 reanalysis data for use calculating ML baselines\n")
+            f.write("# Data is interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest\n")
+            f.write("# Column names have the following format:\n")
+            f.write("# - the text before the first underscore is the variable name\n")
+            f.write("# - the text after the first underscore is the grid point number\n")
+            f.write("# - the text after the (optional) second underscore is the time shift\n")
+            f.write(f"# Processed by: {getpass.getuser()}\n")
+            f.write(f"# Processed on: {pd.Timestamp.now()}\n")
+            f.write(f"# Processed by ml-baselines code\n")
+            f.write(f"# Site: {site}\n")
+            f.write(f"# Year: {year}\n")
+    
+            # Save the DataFrame to a CSV file
+            df_year.to_csv(f, index=False, header=True, mode="a")
+
+        print(f"Preprocessed features for {site} in {year} and saved to {output_filename}")
+
+
 def preprocess_all_features(start_year=1978, end_year=2024, force=False):
     """Preprocesses the meteorological data for all sites and years."""
     for site in site_coords_dict.keys():
@@ -243,6 +298,17 @@ def preprocess_all_features(start_year=1978, end_year=2024, force=False):
             except Exception as e:
                 print(f"Error processing {site} in {year}: {e}")
                 continue
+    print("Preprocessing complete.")
+
+
+def preprocess_all_features_arco_era5(force=False):
+    """Preprocesses the meteorological data for all sites and years."""
+    for site in site_coords_dict.keys():
+        try:
+            preprocess_features_arco_era5(site, force=force)
+        except Exception as e:
+            print(f"Error processing {site}: {e}")
+            continue
     print("Preprocessing complete.")
 
 
@@ -260,7 +326,11 @@ def open_features(site,
         pd.DataFrame: Preprocessed features for the site.
     """
 
-    files = [models_path / "features" / f"features_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
+    features_str = "-arco-era5" if cfg.met_type == "arco-era5" else ""
+
+    expected_columns = [key + f"_{i}" for key in cfg.met_variables.keys() for i in range(17)]
+
+    files = [models_path / "features" / f"features{features_str}_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
 
     for f in files:
         if not f.exists():
@@ -288,6 +358,14 @@ def open_features(site,
                     missing_months = list(missing_months.where(missing_months > 0, drop=True).index)
                     raise ValueError(f"Missing data for {var} in {site}, month {', '.join([str(m) for m in missing_months])}")
 
+        # Check for correct columns in the right order
+        if list(df.columns) != expected_columns:
+            # Check if it's the order that is different
+            if sorted(df.columns) == sorted(expected_columns):
+                raise ValueError(f"Incorrect column order in file {f} . Please check the data.")
+            else:
+                raise ValueError(f"Incorrect columns in file {f} . Please check the data.")
+
         dfs.append(df)
 
     df = pd.concat(dfs, axis=0)
@@ -301,9 +379,15 @@ def open_features(site,
     # Merge the current and past dataframes on their time index
     df_final = pd.merge(df, df_past, left_index=True, right_index=True, how="left")
 
+    # Add hour of day column
+    df_final["hour_of_day"] = df_final.index.hour
+
     return df_final
 
 
 if __name__ == "__main__":
-    # Example usage
-    preprocess_all_features(force=True)
+
+    if cfg.met_type == "arco-era5":
+        preprocess_all_features_arco_era5(force=True)
+    else:
+        preprocess_all_features(force=True)

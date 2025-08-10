@@ -1,4 +1,5 @@
 from pathlib import Path
+import numpy as np
 import json
 
 
@@ -18,6 +19,7 @@ def setup():
         "data_path": "",
         "model_type": "MLPClassifier",
         "models_path": str(root_dir / "models"),
+        "met_type": "arco-era5"
     }
 
     with open(config_path, "w") as f:
@@ -35,17 +37,18 @@ class Config():
         if not (package_dir / "config.json").exists():
             raise FileNotFoundError("Config file not found. Please run setup() to create a new config file, and then populate it.")
 
-        #TODO: Why is this needed?
-        self.compound_list = ['ch4',
-                        'cf4',
-                        'cfc-12',
-                        'ch2cl2',
-                        'ch3br',
-                        'hcfc-22',
-                        'hfc-125',
-                        'hfc-134a',
-                        'n2o',
-                        'sf6']
+        # Paths
+        self.root_dir = root_dir
+        self.package_dir = package_dir
+
+        # Read user config file
+        with open(package_dir / "config.json") as f:
+            config_user = json.load(f)
+
+        self.data_path = config_user["data_path"]
+        self.model_type = config_user["model_type"]
+        self.models_path = config_user["models_path"]
+        self.met_type = config_user.get("met_type", "arco-era5")  # Default to "arco-era5" if not specified
 
         # Site codes and names
         self.site_dict = {
@@ -104,16 +107,69 @@ class Config():
 
         self.confidence_threshold = 0.8
 
-        self.root_dir = root_dir
-        self.package_dir = package_dir
+        # Met variables to be extracted (and their order)
+        self.met_variables = {
+                "sp": {
+                    "file": "single_level",
+                    "var_in_file": "sp",
+                    "level": None,
+                    "units": "hPa",
+                    "long_name": "Surface Pressure",
+                },
+                "blh": {
+                    "file": "single_level",
+                    "var_in_file": "blh",
+                    "level": None,
+                    "units": "m",
+                    "long_name": "Boundary Layer Height",
+                },
+                "u10": {
+                    "file": "single_level",
+                    "var_in_file": "u10",
+                    "level": None,
+                    "units": "m/s",
+                    "long_name": "10m U-component of Wind",
+                },
+                "v10": {
+                    "file": "single_level",
+                    "var_in_file": "v10",
+                    "level": None,
+                    "units": "m/s",
+                    "long_name": "10m V-component of Wind",
+                },
+                "u850": {
+                    "file": "pressure_levels",
+                    "var_in_file": "u",
+                    "level": 850,
+                    "units": "m/s",
+                    "long_name": "850hPa U-component of Wind",
+                },
+                "v850": {
+                    "file": "pressure_levels",
+                    "var_in_file": "v",
+                    "level": 850,
+                    "units": "m/s",
+                    "long_name": "850hPa V-component of Wind",
+                },
+                "u500": {
+                    "file": "pressure_levels",
+                    "var_in_file": "u",
+                    "level": 500,
+                    "units": "m/s",
+                    "long_name": "500hPa U-component of Wind",
+                },
+                "v500": {
+                    "file": "pressure_levels",
+                    "var_in_file": "v",
+                    "level": 500,
+                    "units": "m/s",
+                    "long_name": "500hPa V-component of Wind",
+                },
+            }
 
-        # Read user config file
-        with open(package_dir / "config.json") as f:
-            config_user = json.load(f)
-
-        self.data_path = config_user["data_path"]
-        self.model_type = config_user["model_type"]
-        self.models_path = config_user["models_path"]
+        # Define the grid system (deviations in degrees from the site location)
+        self.lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
+        self.lons_grid = np.array([0, 0, 5, 5, 5, 0, -5, -5, -5, 0, 10, 10, 10, 0, -10, -10, -10])
 
 
 if __name__ == "__main__":
