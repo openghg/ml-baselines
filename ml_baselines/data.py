@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import pandas as pd
+import io
 from pathlib import Path
 import zipfile
 
@@ -91,3 +92,46 @@ def read_intem(site,
     df['baseline'] = df['baseline'].astype(int)
 
     return df
+
+
+def read_agage(site, species,
+               start_year=None,
+               end_year=None):
+    """
+    Read AGAGE data for a specific site and species.
+
+    Args:
+        site (str): Site code (e.g., MHD)
+        species (str): Species code (e.g., cfc-11)
+        start_year (int): Start year for the data extraction (inclusive)
+        end_year (int): End year for the data extraction (inclusive)
+
+    Returns:
+        df (pandas.DataFrame): DataFrame with AGAGE data
+    """
+
+    agage_path = Path(cfg.obs_path)
+
+    if agage_path.suffix == ".zip":
+        # Assume there is a version number in the archive name
+        version = agage_path.stem.split("-")[-1]
+
+        with zipfile.ZipFile(agage_path, 'r') as zf:
+            # Extract the file for a specific site/species
+            nc_filename = f"{species}/agage_{site.lower()}_{species.lower()}_{version}.nc"
+            nc_bytes = zf.read(nc_filename)
+            with io.BytesIO(nc_bytes) as memfile:
+                ds = xr.open_dataset(memfile)
+    else:
+        raise NotImplementedError("Only zip archive is supported for obs_path at the moment.")
+
+    ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
+
+    df = ds[["mf", "mf_repeatability"]].to_dataframe()
+    if "mf_variability" in ds:
+        df["mf_variability"] = ds["mf_variability"].to_dataframe()
+    else:
+        df["mf_variability"] = 0.
+
+    return df
+

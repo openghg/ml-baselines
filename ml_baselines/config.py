@@ -50,6 +50,11 @@ class Config():
         self.models_path = config_user["models_path"]
         self.met_type = config_user.get("met_type", "arco-era5")  # Default to "arco-era5" if not specified
 
+        if "obs_path" in config_user:
+            self.obs_path = config_user["obs_path"]
+        else:
+            self.obs_path = ""
+
         # Site codes and names
         self.site_dict = {
                 "MHD":"Mace Head, Ireland", 
