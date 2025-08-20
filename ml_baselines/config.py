@@ -91,7 +91,7 @@ class Config():
                                 "THD": [2014, 2018],
                                 "ZEP": [2014, 2018],
                                 "SMO": [2014, 2018]}
-        self.validation_period = {"MHD": [2019, 2019],
+        self.validation_period = {"MHD": [2019, 2022],
                                 "RPB": [2019, 2019],
                                 "CGO": [2019, 2019],
                                 "GSN": [2014, 2014],

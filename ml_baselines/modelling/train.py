@@ -1,3 +1,4 @@
+import joblib
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -5,7 +6,7 @@ from pathlib import Path
 import pickle
 
 from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.metrics import precision_score, recall_score, f1_score
 
 from ml_baselines.data import read_intem
@@ -18,9 +19,10 @@ models_path = cfg.models_path
 
 
 def get_train_test_data(site, test_train,
-                        balance=True,
+                        balance=-1,
                         return_dataframe=False,
-                        undersample=False):
+                        undersample=False,
+                        balance_method="random"):
     """ Get the training, testing or validation data for a given site.
 
     Args:
@@ -59,7 +61,7 @@ def get_train_test_data(site, test_train,
     # Merge features and intem data on time. The intem flags should be merged with the nearest features in time
     df = df_intem.merge(df_features, how='left', left_index=True, right_index=True)
     
-    # Drop the nan values
+    # Drop any nan values
     df = df.dropna()
 
     if df.shape[0] == 0:
@@ -71,16 +73,18 @@ def get_train_test_data(site, test_train,
     if not df.index.is_unique:
         raise ValueError(f"Data for {site} has duplicate timestamps in the specified period.")
 
-    if balance:
+    if balance > 0.:
+        if balance > 1:
+            raise ValueError("Balance must be between 0 and 1.")
         # If balance is True, balance the dataset
-        df = balance_dataset(df)
+        df = balance_dataset(df, target_baseline_ratio=balance, method=balance_method)
 
     if undersample:
         # Randomly undersample the dataset
         # First shuffle the DataFrame
         df = df.sample(frac=1, random_state=42).reset_index(drop=True)
         # Then, just keep the first "undersample" rows
-        df = df.iloc[:undersample]
+        df = df.iloc[:int(undersample*len(df))]
 
     if return_dataframe:
         return df
@@ -91,7 +95,7 @@ def get_train_test_data(site, test_train,
         return X, y
 
 
-def balance_dataset(df, target_baseline_ratio=0.8):
+def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
     """ Balance the dataset by undersampling the majority class (baseline or non-baseline) to achieve a target ratio.
     
     Args:
@@ -110,17 +114,30 @@ def balance_dataset(df, target_baseline_ratio=0.8):
                     minority_indices,
                     target_majority_ratio,
                     majority_count,
-                    minority_count):
+                    minority_count,
+                    method="random"):
         undersample_ratio = target_majority_ratio * minority_count / \
                             (majority_count * (1 - target_majority_ratio))
-        # Randomly sample the majority values
-        sampled_majority_indices = np.random.choice(majority_indices_to_subsample,
-                                                    size=int(undersample_ratio * majority_count),
-                                                    replace=False)
-        df_balanced = df.loc[sampled_majority_indices]
+
+        if method == "random":
+            # Randomly sample the majority values
+            sampled_majority_indices = np.random.choice(majority_indices_to_subsample,
+                                                        size=int(undersample_ratio * majority_count),
+                                                        replace=False)
+        elif method == "deterministic":
+            # Deterministically sample the majority values (sample evenly)
+            desired_count = int(np.round(undersample_ratio * majority_count))
+            if desired_count < 1:
+                desired_count = 1
+                print("Warning: Desired count for majority class is less than 1. Setting to 1.")
+            indices = np.linspace(0, len(majority_indices_to_subsample) - 1, desired_count).astype(int)
+            indices = np.unique(indices)  # Ensure unique indices
+            sampled_majority_indices = majority_indices_to_subsample[indices]
+        else:
+            raise ValueError(f"Unknown undersampling method: {method}, must be 'random' or 'deterministic'.")
 
         # Add the minority values
-        return pd.concat([df_balanced, df.loc[minority_indices]])
+        return pd.concat([df.loc[sampled_majority_indices], df.loc[minority_indices]])
 
     if 'baseline' not in df.columns:
         raise ValueError("Input DataFrame must contain a 'baseline' column.")
@@ -142,7 +159,8 @@ def balance_dataset(df, target_baseline_ratio=0.8):
                                   df[df['baseline'] == 0].index,
                                   target_baseline_ratio,
                                   baseline_count,
-                                  non_baseline_count)
+                                  non_baseline_count,
+                                  method=method)
 
     else:
         # If there are too many non-baseline values, we need to undersample them
@@ -151,15 +169,19 @@ def balance_dataset(df, target_baseline_ratio=0.8):
                                   df[df['baseline'] == 1].index,
                                   1 - target_baseline_ratio,
                                   non_baseline_count,
-                                  baseline_count)
+                                  baseline_count,
+                                  method=method)
 
-    # Shuffle the DataFrame
-    df_balanced = df_balanced.sample(frac=1, random_state=42).reset_index(drop=True)
+    # Sort the DataFrame
+    df_balanced = df_balanced.sort_index()
 
     return df_balanced
 
 
 def train_mlp(site,
+            balance=0.5,
+            balance_method="random",
+            undersample=False,
             random_state=42,
             hidden_layer_sizes=(100,), 
             shuffle=False,
@@ -173,7 +195,11 @@ def train_mlp(site,
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=True, undersample=2000)
+    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
+                               undersample=undersample)
+
+    print(f"Number of training points: {len(y)}")
+    print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
     nn_model = MLPClassifier(random_state=random_state,
                             hidden_layer_sizes=hidden_layer_sizes, 
@@ -191,10 +217,14 @@ def train_mlp(site,
     nn_model.fit(X, y)
 
     # Validation
-    X_val, y_val = get_train_test_data(site, "validation")
+    X_val, y_val = get_train_test_data(site, "validation",
+                                       balance=False,
+                                       undersample=False)
 
     # Testing
-    X_test, y_test = get_train_test_data(site, "test")
+    X_test, y_test = get_train_test_data(site, "test",
+                                         balance=False,
+                                         undersample=False)
 
     print("... predicting")
     y_pred_val = nn_model.predict(X_val)
@@ -215,7 +245,7 @@ def train_mlp(site,
     print(f"F1 Score on Training Set = {f1_train:.3f}")
     print(f"F1 Score on Testing Set = {f1_val:.3f}")
 
-    return nn_model, X_test, y_test
+    return nn_model, X, y
 
 
 def train_mlp_grid_search(site, param_grid=None):
@@ -229,51 +259,92 @@ def train_mlp_grid_search(site, param_grid=None):
         GridSearchCV: The trained model with the best hyperparameters.
     """
     
-    X_train, y_train = get_train_test_data(site, "train", balance=True)
-
     if param_grid is None:
         param_grid = {
-            'hidden_layer_sizes': [(50,50,50), (50,100,50), (100,)],
-            'activation': ['tanh', 'relu'],
-            'solver': ['sgd', 'adam'],
-            'alpha': [0.0001, 0.05],
-            'learning_rate': ['constant','adaptive'],
-            'batch_size': [100, 200, 300],
+            'hidden_layer_sizes': [(50,50), (50), (100,)],
+            'activation': ['relu'],
+            'solver': ['adam'],
+            'alpha': [0.0001],
+            'learning_rate': ['constant', 'adaptive'],
+            'batch_size': [100],
             'max_iter': [1000, 2000],
-            'early_stopping': [True, False]
+            'early_stopping': [False],
+            'shuffle': [False]
+            # 'activation': ['relu'],
+            # 'solver': ['adam'],
+            # 'alpha': [0.0001, 0.05],
+            # 'learning_rate': ['constant','adaptive'],
+            # 'batch_size': [100, 200, 300],
+            # 'max_iter': [1000, 2000],
+            # 'early_stopping': [True, False]
         }
 
-    grid_search = GridSearchCV(
-        MLPClassifier(random_state=42),
-        param_grid,
-        scoring='f1',
-        cv=5,
-        verbose=2,
-        n_jobs=-1
-    )
+    X_val, y_val = get_train_test_data(site, "validation",
+                                       balance=False, undersample=False)
 
-    print(f"Training MLP model for site: {site} with grid search...")
-    grid_search.fit(X_train, y_train)
+    balance = 0.5
 
-    print("Best parameters found: ", grid_search.best_params_)
-    print("Best score: ", grid_search.best_score_)
+    best_params = []
+    best_scores = []
+    best_balances = []
+
+    for balance in np.arange(0.2, 0.8, 0.1):
+        X_train, y_train = get_train_test_data(site, "train", balance=balance,
+                                            undersample=False,
+                                            balance_method="deterministic")
+
+        # Combine your training and validation sets
+        X_all = pd.concat([X_train, X_val])
+        y_all = pd.concat([y_train, y_val])
+
+        # Create a test_fold array: assign -1 for training rows and 0 for validation rows
+        test_fold = [-1] * len(X_train) + [0] * len(X_val)
+        ps = PredefinedSplit(test_fold=test_fold)
+
+        grid_search = GridSearchCV(
+            MLPClassifier(random_state=42),
+            param_grid,
+            scoring="f1",
+            cv=ps,
+            refit=False, 
+            verbose=2,
+            n_jobs=-1
+        )
+
+        print(f"Training MLP model for site: {site} with grid search...")
+        grid_search.fit(X_all, y_all)
+
+        print("Best parameters found: ", grid_search.best_params_)
+        print("Best score: ", grid_search.best_score_)
+
+        best_params.append(grid_search.best_params_)
+        best_scores.append(grid_search.best_score_)
+        best_balances.append(balance)
 
     # Validation
-    X_val, y_val = get_train_test_data(site, "validation")
-    y_pred_val = grid_search.predict(X_val)
+#    best_params = grid_search.best_params_
+    # find best of best scores
+    best_index = best_scores.index(max(best_scores))
+    best_best_params = best_params[best_index]
 
-    precision_val = precision_score(y_val, y_pred_val)
-    recall_val = recall_score(y_val, y_pred_val)
-    f1_val = f1_score(y_val, y_pred_val)
+    print(f"Best balance {best_balances[best_index]}")
+    print(f"Best parameters across all balances: {best_best_params}")
 
-    # Save the best model
-    best_model = grid_search.best_estimator_
-    best_model_path = Path(models_path) / f"{site}_mlp_best_model.pkl"
-    with open(best_model_path, 'wb') as f:
-        pickle.dump(best_model, f)
+    best_model = MLPClassifier(random_state=42, **best_best_params)
+    best_model.fit(X_train, y_train)
 
-    pass
+    pred_val = best_model.predict(X_val)
+
+    precision_val = precision_score(y_val, pred_val)
+    recall_val = recall_score(y_val, pred_val)
+    f1_val = f1_score(y_val, pred_val)
+
+    print(f"Validation Precision = {precision_val:.3f}")
+    print(f"Validation Recall = {recall_val:.3f}")
+    print(f"Validation F1 Score = {f1_val:.3f}")
+
+    # Save model
+    met_str = f"-{cfg.met_type}" if cfg.met_type else ""
+    joblib.dump(best_model, Path(cfg.models_path) / f"best_mlp{met_str}_{site}.joblib")
 
     return grid_search
-
-#train_mlp_grid_search("MHD", param_grid = None)
