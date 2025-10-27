@@ -175,7 +175,10 @@ def preprocess_features(site, year, force=False):
     print(f"Preprocessed features for {site} in {year} and saved to {output_filename}")
 
 
-def preprocess_features_arco_era5(site, force=False):
+def preprocess_features_arco_era5(site,
+                                  force = False,
+                                  input_dir = "",
+                                  output_dir = ""):
     """Preprocess features that have been extracted from the ARCO ERA5 reanalysis data.
 
     These files should have already undergone some preprocessing (see gcp_era5 container), including 
@@ -184,10 +187,19 @@ def preprocess_features_arco_era5(site, force=False):
     Args:
         site (str): Site code.
         force (bool): If True, force reprocessing even if the file already exists.
+        input_dir (str): Directory where the input files are located if not in location specified in config. 
+            Mainly used for testing purposes. If empty, uses default path.
+        output_dir (str): Directory where the output files will be saved if not in location specified in config. 
+            Mainly used for testing purposes. If empty, uses default path.
+    Returns:
+        None
     """
     
     # Path to the data
-    data_path = met_path / "arco-era5"
+    if input_dir:
+        data_path = Path(input_dir)
+    else:
+        data_path = met_path / "arco-era5"
 
     files = sorted((data_path).glob(f"era5*{site.upper()}*.nc"))
 
@@ -263,7 +275,10 @@ def preprocess_features_arco_era5(site, force=False):
     df = df.reset_index()
 
     for year in years:
-        output_filename = models_path / "features" / f"features-arco-era5_{site}_{year}.csv.gz"
+        if output_dir:
+            output_filename = Path(output_dir) / f"features-arco-era5_{site}_{year}.csv.gz"
+        else:
+            output_filename = models_path / "features" / f"features-arco-era5_{site}_{year}.csv.gz"
         if output_filename.exists() and not force:
             print(f"Skipping {output_filename}, already exists.")
             continue

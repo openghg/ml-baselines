@@ -55,7 +55,7 @@ def test_balance_dataset():
     assert np.isclose(baseline_count / (baseline_count + non_baseline_count), 0.8, atol=0.01), "Baseline ratio is not 0.8"
     assert np.isclose(non_baseline_count / (baseline_count + non_baseline_count), 0.2, atol=0.01), "Non-baseline ratio is not 0.2"
 
-    # CCheck the deterministic version
+    # Check the deterministic version
     df_out = balance_dataset(df, target_baseline_ratio=0.8, method="deterministic")
 
     # Check if the output DataFrame has the expected ratio of baseline to non-baseline
