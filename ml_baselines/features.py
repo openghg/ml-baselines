@@ -329,13 +329,16 @@ def preprocess_all_features_arco_era5(force=False):
 
 def open_features(site,
                 start_year=1978,
-                end_year=2024):
+                end_year=2024,
+                features_dir=""):
     """Opens the preprocessed features for a given site.
 
     Args:
         site (str): Site code.
         start_year (int): Start year to retrieve data (inclusive).
         end_year (int): End year for to retrieve data (inclusive).
+        features_dir (str): Directory where the features files are located if not in location specified in config. 
+            Mainly used for testing purposes. If empty, uses default path.
 
     Returns:
         pd.DataFrame: Preprocessed features for the site.
@@ -345,7 +348,12 @@ def open_features(site,
 
     expected_columns = [key + f"_{i}" for key in cfg.met_variables.keys() for i in range(17)]
 
-    files = [models_path / "features" / f"features{features_str}_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
+    if features_dir:
+        features_path = Path(features_dir)
+    else:
+        features_path = models_path / "features"
+
+    files = [features_path / f"features{features_str}_{site.upper()}_{year}.csv.gz" for year in range(start_year, end_year+1)]
 
     for f in files:
         if not f.exists():
