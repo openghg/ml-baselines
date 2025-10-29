@@ -1,7 +1,7 @@
 import numpy as np
 
-
 from ml_baselines.modelling.train import balance_dataset
+
 
 def test_balance_dataset():
     # Test function for balance_dataset

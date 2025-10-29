@@ -20,8 +20,8 @@ models_path = cfg.models_path
 
 def get_train_test_data(site, test_train,
                         balance=-1,
+                        undersample=0,
                         return_dataframe=False,
-                        undersample=False,
                         balance_method="random"):
     """ Get the training, testing or validation data for a given site.
 
@@ -29,7 +29,11 @@ def get_train_test_data(site, test_train,
         site (str): The site for which to get the data.
         test_train (str): The type of data to get. Must be one of 'train', 'test', or 'validation'.
         balance (bool): If True, balance the dataset by undersampling the majority class.
+            NOTE: This is only applied to training data (ignored for test or validation).
+        undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
+            NOTE: This is only applied to training data (ignored for test or validation).
         return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
+        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
 
     Returns:
         pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
@@ -73,13 +77,19 @@ def get_train_test_data(site, test_train,
     if not df.index.is_unique:
         raise ValueError(f"Data for {site} has duplicate timestamps in the specified period.")
 
-    if balance > 0.:
+    # Balance the dataset if required FOR TRAINING DATA ONLY
+    if balance > 0. and test_train == "train":
+        print(f"... balancing dataset to target baseline ratio of {balance}")
         if balance > 1:
             raise ValueError("Balance must be between 0 and 1.")
         # If balance is True, balance the dataset
         df = balance_dataset(df, target_baseline_ratio=balance, method=balance_method)
 
-    if undersample:
+    # Undersample the dataset if required FOR TRAINING DATA ONLY
+    if undersample and test_train == "train":
+        print(f"... undersampling dataset to fraction {undersample}")
+        if not (0. < undersample <= 1.):
+            raise ValueError("Undersample must be a float between 0 and 1.")
         # Randomly undersample the dataset
         # First shuffle the DataFrame
         df = df.sample(frac=1, random_state=42).reset_index(drop=True)
@@ -181,17 +191,8 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
 def train_mlp(site,
             balance=0.5,
             balance_method="random",
-            undersample=False,
-            random_state=42,
-            hidden_layer_sizes=(100,), 
-            shuffle=False,
-            activation='relu', 
-            solver='adam', 
-            alpha=0.0001, 
-            learning_rate='constant', 
-            batch_size=100, 
-            early_stopping=False,
-            max_iter=1000):
+            undersample=0,
+            mlp_params=None,):
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
@@ -201,16 +202,7 @@ def train_mlp(site,
     print(f"Number of training points: {len(y)}")
     print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
-    nn_model = MLPClassifier(random_state=random_state,
-                            hidden_layer_sizes=hidden_layer_sizes, 
-                            shuffle=shuffle,
-                            activation=activation, 
-                            solver=solver,
-                            alpha=alpha, 
-                            learning_rate=learning_rate,
-                            batch_size=batch_size,
-                            early_stopping=early_stopping,
-                            max_iter=max_iter)
+    nn_model = MLPClassifier(**mlp_params, random_state=42)
 
     # Fit the model
     print("... fitting")
@@ -218,13 +210,13 @@ def train_mlp(site,
 
     # Validation
     X_val, y_val = get_train_test_data(site, "validation",
-                                       balance=False,
-                                       undersample=False)
+                                       balance=-1,
+                                       undersample=0)
 
     # Testing
     X_test, y_test = get_train_test_data(site, "test",
-                                         balance=False,
-                                         undersample=False)
+                                         balance=-1,
+                                         undersample=0)
 
     print("... predicting")
     y_pred_val = nn_model.predict(X_val)
@@ -239,11 +231,11 @@ def train_mlp(site,
     f1_train = f1_score(y, y_pred_train)
 
     print(f"Precision on Training Set = {precision_train:.3f}")
-    print(f"Precision on Testing Set = {precision_val:.3f}")
+    print(f"Precision on Validation Set = {precision_val:.3f}")
     print(f"Recall on Training Set = {recall_train:.3f}")
-    print(f"Recall on Testing Set = {recall_val:.3f}")
+    print(f"Recall on Validation Set = {recall_val:.3f}")
     print(f"F1 Score on Training Set = {f1_train:.3f}")
-    print(f"F1 Score on Testing Set = {f1_val:.3f}")
+    print(f"F1 Score on Validation Set = {f1_val:.3f}")
 
     return nn_model, X, y
 
@@ -266,10 +258,10 @@ def train_mlp_grid_search(site, param_grid=None):
             'solver': ['adam'],
             'alpha': [0.0001],
             'learning_rate': ['constant', 'adaptive'],
-            'batch_size': [100],
+            'batch_size': [100, 50],
             'max_iter': [1000, 2000],
-            'early_stopping': [False],
-            'shuffle': [False]
+            'early_stopping': [False, True],
+            'shuffle': [False, True]
             # 'activation': ['relu'],
             # 'solver': ['adam'],
             # 'alpha': [0.0001, 0.05],
@@ -279,8 +271,7 @@ def train_mlp_grid_search(site, param_grid=None):
             # 'early_stopping': [True, False]
         }
 
-    X_val, y_val = get_train_test_data(site, "validation",
-                                       balance=False, undersample=False)
+    X_val, y_val = get_train_test_data(site, "validation")
 
     balance = 0.5
 
@@ -290,7 +281,6 @@ def train_mlp_grid_search(site, param_grid=None):
 
     for balance in np.arange(0.2, 0.8, 0.1):
         X_train, y_train = get_train_test_data(site, "train", balance=balance,
-                                            undersample=False,
                                             balance_method="deterministic")
 
         # Combine your training and validation sets

@@ -82,7 +82,7 @@ class Config():
                     }
 
         # Time periods
-        self.training_period = {"MHD": [2014, 2018],
+        self.training_period = {"MHD": [2018, 2018],
                                 "RPB": [2014, 2018],
                                 "CGO": [2014, 2018],
                                 "GSN": [2009, 2013],
@@ -91,7 +91,8 @@ class Config():
                                 "THD": [2014, 2018],
                                 "ZEP": [2014, 2018],
                                 "SMO": [2014, 2018]}
-        self.validation_period = {"MHD": [2019, 2022],
+        
+        self.validation_period = {"MHD": [2019, 2019],
                                 "RPB": [2019, 2019],
                                 "CGO": [2019, 2019],
                                 "GSN": [2014, 2014],
@@ -100,6 +101,7 @@ class Config():
                                 "THD": [2019, 2019],
                                 "ZEP": [2019, 2019],
                                 "SMO": [2019, 2019]}
+        
         self.testing_period = {"MHD": [2020, 2023],
                                 "RPB": [2020, 2023],
                                 "CGO": [2020, 2023],
