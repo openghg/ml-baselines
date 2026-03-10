@@ -253,15 +253,15 @@ def train_mlp_grid_search(site, param_grid=None):
     
     if param_grid is None:
         param_grid = {
-            'hidden_layer_sizes': [(50,50), (50), (100,)],
+            'hidden_layer_sizes': [ (50), (100,)],
             'activation': ['relu'],
             'solver': ['adam'],
             'alpha': [0.0001],
-            'learning_rate': ['constant', 'adaptive'],
-            'batch_size': [100, 50],
-            'max_iter': [1000, 2000],
-            'early_stopping': [False, True],
-            'shuffle': [False, True]
+            'learning_rate': ['constant'],
+            'batch_size': [50],
+            'max_iter': [1000],
+            'early_stopping': [False],
+            'shuffle': [False]
             # 'activation': ['relu'],
             # 'solver': ['adam'],
             # 'alpha': [0.0001, 0.05],
@@ -273,13 +273,11 @@ def train_mlp_grid_search(site, param_grid=None):
 
     X_val, y_val = get_train_test_data(site, "validation")
 
-    balance = 0.5
-
     best_params = []
     best_scores = []
     best_balances = []
 
-    for balance in np.arange(0.2, 0.8, 0.1):
+    for balance in np.arange(0.2, 0.9, 0.1):
         X_train, y_train = get_train_test_data(site, "train", balance=balance,
                                             balance_method="deterministic")
 
@@ -311,18 +309,22 @@ def train_mlp_grid_search(site, param_grid=None):
         best_scores.append(grid_search.best_score_)
         best_balances.append(balance)
 
-    # Validation
-#    best_params = grid_search.best_params_
-    # find best of best scores
+    # Find the best combination across all balances
     best_index = best_scores.index(max(best_scores))
     best_best_params = best_params[best_index]
+    best_balance = best_balances[best_index]
 
-    print(f"Best balance {best_balances[best_index]}")
+    print(f"Best balance {best_balance}")
     print(f"Best parameters across all balances: {best_best_params}")
 
+    # Train final model with the best balance and parameters
+    X_train_final, y_train_final = get_train_test_data(site, "train", balance=best_balance,
+                                                      balance_method="deterministic")
+    
     best_model = MLPClassifier(random_state=42, **best_best_params)
-    best_model.fit(X_train, y_train)
+    best_model.fit(X_train_final, y_train_final)
 
+    # Evaluate on validation set
     pred_val = best_model.predict(X_val)
 
     precision_val = precision_score(y_val, pred_val)
@@ -333,8 +335,8 @@ def train_mlp_grid_search(site, param_grid=None):
     print(f"Validation Recall = {recall_val:.3f}")
     print(f"Validation F1 Score = {f1_val:.3f}")
 
-    # Save model
-    met_str = f"-{cfg.met_type}" if cfg.met_type else ""
-    joblib.dump(best_model, Path(cfg.models_path) / f"best_mlp{met_str}_{site}.joblib")
+    # # Save model
+    # met_str = f"-{cfg.met_type}" if cfg.met_type else ""
+    # joblib.dump(best_model, Path(cfg.models_path) / f"best_mlp{met_str}_{site}.joblib")
 
-    return grid_search
+    return best_model, best_best_params, best_balance
