@@ -47,18 +47,22 @@ def read_intem(site,
     # Find the files in the zip archive
     with zipfile.ZipFile(intem_zip_path, 'r') as zip_ref:
 
-        # Find all files in archive matching "{site_translator[site]}*.txt"
-        files = [zip_ref.extract(file, path=package_path / "data") for file in zip_ref.namelist() if file.startswith(f"{site_translator[site]}") and file.endswith(".txt")]
+        # Find matching members inside the archive (no extraction)
+        members = [
+            name for name in zip_ref.namelist()
+            if Path(name).name.startswith(site_translator[site]) and name.endswith(".txt")
+        ]
 
-        # If start_year is not None, filter files by year
+        # Optional year filtering based on filename
         if start_year is not None:
-            files = [file for file in files if int(file.split("_")[-1][:4]) >= start_year]
+            members = [name for name in members if int(Path(name).stem.split("_")[-1][:4]) >= start_year]
         if end_year is not None:
-            files = [file for file in files if int(file.split("_")[-1][:4]) <= end_year]
+            members = [name for name in members if int(Path(name).stem.split("_")[-1][:4]) <= end_year]
 
-        for file in files:
-            # Read the data, skipping metadata, putting into pandas dataframe
-            data = pd.read_csv(file, skiprows=6, sep=r'\s+')
+        for name in members:
+            # Read text directly from the zip entry in memory
+            with zip_ref.open(name) as fh:
+                data = pd.read_csv(io.TextIOWrapper(fh, encoding="utf-8"), skiprows=6, sep=r"\s+")
 
             # Setting the index of the dataframe to be the extracted datetime and naming it time
             data.index = pd.to_datetime(data['YY'].astype(str) + "-" + \
