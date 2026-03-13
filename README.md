@@ -58,6 +58,11 @@ We provide two possible routes to obtaining these data:
 The advantage of the first approach is it is free to use, and you could explore the use of different grids, etc. The second approach is much faster as all of the processing can be done in parallel (hours versus weeks to download) and requires orders of magnitude less storage space, since only the required fields are extracted in the cloud. However, it uses GCP credits (~$100 to extract ~40 years of data at 9 sites). The zarr store could also be accessed from an external server, but processing would likely be substantially slower (not tested in earnest).
 
 
+### Observational data
+
+Currently, will only read in AGAGE data files. These can be provided as a zip archive of the type that can be downloaded from the AGAGE website.
+
+
 ## Developer notes
 
 To install an editable version of this package in your environment, go to the root directory of this repo and type:

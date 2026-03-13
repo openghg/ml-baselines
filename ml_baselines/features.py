@@ -10,7 +10,7 @@ from ml_baselines.utils import longitude_to_360
 
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
-met_path = Path(cfg.data_path + "/meteorological_data")
+met_path = Path(cfg.met_path)
 models_path = Path(cfg.models_path)
 
 lats_grid = cfg.lats_grid
@@ -40,8 +40,9 @@ def preprocess_features(site, year, force=False):
     """
 
     # Path to the data
-    data_path = met_path / "ECMWF" / site.upper()
+    data_path = met_path / site.upper()
 
+    # TODO: make output filename more descriptive, so we can test different feature sets
     output_filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
 
     # Check if the data path exists
@@ -184,6 +185,8 @@ def preprocess_features_arco_era5(site,
     These files should have already undergone some preprocessing (see gcp_era5 container), including 
     interpolation onto a grid with +/- 5 and 10 degrees latitude and longitude
 
+    Expected filename format is era5-<site>-<year>.nc, and the files should be located in the directory specified by cfg.met_path (or input_dir if specified).
+
     Args:
         site (str): Site code.
         force (bool): If True, force reprocessing even if the file already exists.
@@ -199,7 +202,7 @@ def preprocess_features_arco_era5(site,
     if input_dir:
         data_path = Path(input_dir)
     else:
-        data_path = met_path / "arco-era5"
+        data_path = met_path
 
     files = sorted((data_path).glob(f"era5*{site.upper()}*.nc"))
 

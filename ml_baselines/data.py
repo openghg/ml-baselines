@@ -10,7 +10,6 @@ from ml_baselines.config import Config
 
 cfg = Config()
 site_coords_dict = cfg.site_coords_dict
-data_path = Path(cfg.data_path)
 package_path = cfg.package_dir
 root_path = cfg.root_dir
 
