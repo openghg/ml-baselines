@@ -73,14 +73,29 @@ def test_open_features():
                            end_year=2020,
                            features_dir=temp_dir)
     
+        df_6_24 = open_features("MHD",
+                                start_year=2020,
+                                end_year=2020,
+                                time_shift_hours=[6, 24],
+                                features_dir=temp_dir)
+
     columns = []
     for key in cfg.met_variables.keys():
         for i in range(17):
             columns.append(f"{key}_{i}")
 
+    # Check that the hour_of_day column is correctly computed
+    hour_of_day = df.index.hour.values
+    assert np.all(df["hour_of_day"].values == hour_of_day), "hour_of_day column is not correctly computed."
+
+    ### TEST LAGS
     columns_6h = []
+    columns_24h = []
     for column in columns:
         columns_6h.append(f"{column}_6h")
+        columns_24h.append(f"{column}_24h")
+
+    ### Firstly, just test the 6-hour lagged features
 
     expected_columns = columns + columns_6h
 
@@ -98,3 +113,21 @@ def test_open_features():
     # Check that the hour_of_day column is correctly computed
     hour_of_day = df.index.hour.values
     assert np.all(df["hour_of_day"].values == hour_of_day), "hour_of_day column is not correctly computed."
+
+    ### Now test the 6 and 24-hour lagged features
+
+    expected_columns = columns + columns_6h + columns_24h
+
+    # Check that all expected met. columns are present
+    assert all([col in df_6_24.columns for col in expected_columns]), "Not all expected columns are present in the opened features DataFrame."
+
+    # Check that all _6h and _24h columns are indeed 6- and 24-hours lagged behind their original columns
+    now_columns = [col for col in expected_columns if not col.endswith("_6h") and not col.endswith("_24h")]
+    lagged_columns_6h = [col for col in expected_columns if col.endswith("_6h")]
+    lagged_columns_24h = [col for col in expected_columns if col.endswith("_24h")]
+
+    future_rows_6h = df_6_24[df_6_24.index >= df_6_24.index[0] + pd.Timedelta(hours=6)]
+    future_rows_24h = df_6_24[df_6_24.index >= df_6_24.index[0] + pd.Timedelta(hours=24)]
+
+    assert np.all(df_6_24[now_columns].iloc[:len(future_rows_6h)].values == future_rows_6h[lagged_columns_6h].values), "Lagged columns do not match the expected 6-hour lag."
+    assert np.all(df_6_24[now_columns].iloc[:len(future_rows_24h)].values == future_rows_24h[lagged_columns_24h].values), "Lagged columns do not match the expected 24-hour lag."

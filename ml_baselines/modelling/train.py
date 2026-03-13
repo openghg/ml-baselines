@@ -21,6 +21,7 @@ models_path = cfg.models_path
 def get_train_test_data(site, test_train,
                         balance=-1,
                         undersample=0,
+                        time_shift_hours=[6],
                         return_dataframe=False,
                         balance_method="random"):
     """ Get the training, testing or validation data for a given site.
@@ -32,6 +33,7 @@ def get_train_test_data(site, test_train,
             NOTE: This is only applied to training data (ignored for test or validation).
         undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
             NOTE: This is only applied to training data (ignored for test or validation).
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
 
@@ -57,7 +59,8 @@ def get_train_test_data(site, test_train,
 
     df_features = open_features(site,
                             start_year = start_year,
-                            end_year = end_year)
+                            end_year = end_year,
+                            time_shift_hours = time_shift_hours)
     df_intem = read_intem(site,
                         start_year = start_year,
                         end_year = end_year)
@@ -192,12 +195,13 @@ def train_mlp(site,
             balance=0.5,
             balance_method="random",
             undersample=0,
+            time_shift_hours=[6],
             mlp_params=None,):
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
     X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
-                               undersample=undersample)
+                               time_shift_hours=time_shift_hours, undersample=undersample)
 
     print(f"Number of training points: {len(y)}")
     print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
@@ -210,13 +214,17 @@ def train_mlp(site,
 
     # Validation
     X_val, y_val = get_train_test_data(site, "validation",
-                                       balance=-1,
-                                       undersample=0)
+                                       balance=balance,
+                                       balance_method=balance_method,
+                                       time_shift_hours=time_shift_hours,
+                                       undersample=undersample)
 
     # Testing
     X_test, y_test = get_train_test_data(site, "test",
-                                         balance=-1,
-                                         undersample=0)
+                                         balance=balance,
+                                         balance_method=balance_method,
+                                         time_shift_hours=time_shift_hours,
+                                         undersample=undersample)
 
     print("... predicting")
     y_pred_val = nn_model.predict(X_val)
@@ -271,7 +279,7 @@ def train_mlp_grid_search(site, param_grid=None):
             # 'early_stopping': [True, False]
         }
 
-    X_val, y_val = get_train_test_data(site, "validation")
+    X_val, y_val = get_train_test_data(site, "validation", time_shift_hours=time_shift_hours)
 
     best_params = []
     best_scores = []
@@ -279,7 +287,7 @@ def train_mlp_grid_search(site, param_grid=None):
 
     for balance in np.arange(0.2, 0.9, 0.1):
         X_train, y_train = get_train_test_data(site, "train", balance=balance,
-                                            balance_method="deterministic")
+                                            balance_method="deterministic", time_shift_hours=time_shift_hours)
 
         # Combine your training and validation sets
         X_all = pd.concat([X_train, X_val])
@@ -319,7 +327,7 @@ def train_mlp_grid_search(site, param_grid=None):
 
     # Train final model with the best balance and parameters
     X_train_final, y_train_final = get_train_test_data(site, "train", balance=best_balance,
-                                                      balance_method="deterministic")
+                                                      balance_method="deterministic", time_shift_hours=time_shift_hours)
     
     best_model = MLPClassifier(random_state=42, **best_best_params)
     best_model.fit(X_train_final, y_train_final)
