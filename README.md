@@ -4,13 +4,48 @@ A machine learning library for the estimation of greenhouse gas baseline timeser
 
 ## Setup
 
+### File structure
+
+This repository is structured as follows:
+
+```
+data/ # data files required to run the code
+   ├── intem_baselines.zip  # baseline flags from InTEM
+   ├── site_info.json # Site information (location, validation/testing periods, etc.)
+   └── met_info.json # Meteorological variable information (variable names, levels, etc.)
+docker/ # dockerfiles for extracting meteorlogical fields from ERA-5 on GCP in a container
+ml_baselines/   # main package
+├── met_retrieve/
+├── models/
+├── data/
+└── config.json # untracked config file for specifying paths
+models/ # trained models and features
+└── features/ # extracted features for training/testing
+notebooks/ # Jupyter notebooks for experimentation and visualization
+tests/ # unit and integration tests
+```
+
+In addition, you must specify the location of meteorological fields and mole fraction observations.
+
+### Configuration
+
 Some configuration parameters are required to run this code. These are stored in an untracked file ```ml_baselines/config.json```. To create a template of this file, run:
 
 ```
 python ml_baselines/config.py
 ```
 
-Input the ```data_path``` and other parameters in the relevant fields.
+Example structure of ```config.json```:
+
+```
+{
+    "met_path": <path to meteorological data files>,
+    "obs_path": <path to mole fraction observation files>,
+    "model_type": "MLPClassifier",
+    "models_path": <defaults to location in repository>,
+    "met_type": "arco-era5"
+}
+```
 
 ### Meteorological fields
 

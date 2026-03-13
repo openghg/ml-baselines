@@ -1,0 +1,58 @@
+{
+    "sp": {
+        "file": "single_level",
+        "var_in_file": "sp",
+        "level": "",
+        "units": "hPa",
+        "long_name": "Surface Pressure"
+    },
+    "blh": {
+        "file": "single_level",
+        "var_in_file": "blh",
+        "level": "",
+        "units": "m",
+        "long_name": "Boundary Layer Height"
+    },
+    "u10": {
+        "file": "single_level",
+        "var_in_file": "u10",
+        "level": "",
+        "units": "m/s",
+        "long_name": "10m U-component of Wind"
+    },
+    "v10": {
+        "file": "single_level",
+        "var_in_file": "v10",
+        "level": "",
+        "units": "m/s",
+        "long_name": "10m V-component of Wind"
+    },
+    "u850": {
+        "file": "pressure_levels",
+        "var_in_file": "u",
+        "level": 850,
+        "units": "m/s",
+        "long_name": "850hPa U-component of Wind"
+    },
+    "v850": {
+        "file": "pressure_levels",
+        "var_in_file": "v",
+        "level": 850,
+        "units": "m/s",
+        "long_name": "850hPa V-component of Wind"
+    },
+    "u500": {
+        "file": "pressure_levels",
+        "var_in_file": "u",
+        "level": 500,
+        "units": "m/s",
+        "long_name": "500hPa U-component of Wind"
+    },
+    "v500": {
+        "file": "pressure_levels",
+        "var_in_file": "v",
+        "level": 500,
+        "units": "m/s",
+        "long_name": "500hPa V-component of Wind"
+    }
+}
