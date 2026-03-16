@@ -1,9 +1,5 @@
-import joblib
 import numpy as np
-import xarray as xr
 import pandas as pd
-from pathlib import Path
-import pickle
 
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
@@ -197,6 +193,19 @@ def train_mlp(site,
             undersample=0,
             time_shift_hours=[6],
             mlp_params=None,):
+    """ Train a MLP model for a given site.
+
+    Args:
+        site (str): The site for which to train the model.
+        balance (float): The target ratio of baseline to non-baseline
+            values in the training data. Must be between 0 and 1. Only applied to training data.
+        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
+        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
+        mlp_params (dict): A dictionary of hyperparameters to pass to the MLPClassifier. If None, default parameters will be used.
+    Returns:
+        MLPClassifier: The trained MLP model.
+    """
 
     # Get the training data
     print(f"Training MLP model for site: {site}")
@@ -220,40 +229,50 @@ def train_mlp(site,
                                        undersample=undersample)
 
     # Testing
+    #TODO: Testing on unbalanced data?
     X_test, y_test = get_train_test_data(site, "test",
-                                         balance=balance,
-                                         balance_method=balance_method,
                                          time_shift_hours=time_shift_hours,
-                                         undersample=undersample)
+                                         )
 
     print("... predicting")
     y_pred_val = nn_model.predict(X_val)
     y_pred_train = nn_model.predict(X)
+    y_pred_test = nn_model.predict(X_test)
 
     # calculating scores
     precision_val = precision_score(y_val, y_pred_val)
     precision_train = precision_score(y, y_pred_train)
+    precision_test = precision_score(y_test, y_pred_test)
     recall_val = recall_score(y_val, y_pred_val)
     recall_train = recall_score(y, y_pred_train)
+    recall_test = recall_score(y_test, y_pred_test)
+
     f1_val = f1_score(y_val, y_pred_val)
     f1_train = f1_score(y, y_pred_train)
+    f1_test = f1_score(y_test, y_pred_test)
 
     print(f"Precision on Training Set = {precision_train:.3f}")
     print(f"Precision on Validation Set = {precision_val:.3f}")
+    print(f"Precision on Test Set = {precision_test:.3f}")
     print(f"Recall on Training Set = {recall_train:.3f}")
     print(f"Recall on Validation Set = {recall_val:.3f}")
+    print(f"Recall on Test Set = {recall_test:.3f}")
     print(f"F1 Score on Training Set = {f1_train:.3f}")
     print(f"F1 Score on Validation Set = {f1_val:.3f}")
+    print(f"F1 Score on Test Set = {f1_test:.3f}")
 
     return nn_model, X, y
 
 
-def train_mlp_grid_search(site, param_grid=None):
+def train_mlp_grid_search(site,
+                          param_grid=None,
+                          time_shift_hours=[6]):
     """ Train a MLP model using grid search for hyperparameter tuning.
 
     Args:
         site (str): The site for which to train the model.
         param_grid (dict, optional): A dictionary containing the hyperparameters to tune. If None, default values are used.
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
 
     Returns:
         GridSearchCV: The trained model with the best hyperparameters.
@@ -286,8 +305,12 @@ def train_mlp_grid_search(site, param_grid=None):
     best_balances = []
 
     for balance in np.arange(0.2, 0.9, 0.1):
+
+        #TODO: Could also do undersampling instead of balancing, or both?
+        # and could also do different balance methods (random vs deterministic)
         X_train, y_train = get_train_test_data(site, "train", balance=balance,
-                                            balance_method="deterministic", time_shift_hours=time_shift_hours)
+                                            balance_method="deterministic",
+                                            time_shift_hours=time_shift_hours)
 
         # Combine your training and validation sets
         X_all = pd.concat([X_train, X_val])
@@ -327,7 +350,8 @@ def train_mlp_grid_search(site, param_grid=None):
 
     # Train final model with the best balance and parameters
     X_train_final, y_train_final = get_train_test_data(site, "train", balance=best_balance,
-                                                      balance_method="deterministic", time_shift_hours=time_shift_hours)
+                                                      balance_method="deterministic",
+                                                      time_shift_hours=time_shift_hours)
     
     best_model = MLPClassifier(random_state=42, **best_best_params)
     best_model.fit(X_train_final, y_train_final)
