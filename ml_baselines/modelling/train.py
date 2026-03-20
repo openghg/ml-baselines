@@ -186,13 +186,49 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
 
     return df_balanced
 
+def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, verbose=True):
+    """ 
+    Generate a Series of sample weights for the baseline dataset, using the specified weights.  
+    
+    Samples with a higher weight will have more influence on the model during training. This can be used to address class imbalance by giving more weight to the minority class (baseline). If baseline_weight == "auto", it will be set to 1/class_frequency, and non_baseline_weight will be set to 1.0. If baseline_weight is a float, it will be used directly, and non_baseline_weight will be used for the other class.
+
+    Args:
+        y (pd.Series): The target variable containing 0s and 1s, where 1 indicates the baseline class and 0 indicates the non-baseline class.
+        baseline_weight (float or str): The weight to assign to the baseline class (1s). If "auto", it will be set to 1/class_frequency. Default is 1.0.
+        non_baseline_weight (float): The weight to assign to the non-baseline class (0s). Default is 1.0.
+
+    Returns:
+        pd.Series: A Series of sample weights corresponding to each entry in y, with the same index. 
+    """
+    weights = pd.Series(np.ones_like(y, dtype=float), index=y.index)
+    if baseline_weight == "auto":
+        baseline_weight = 1.0 / (y == 1).mean()
+        non_baseline_weight = 1.0
+        if verbose:
+            print("Assigning baseline sample weights automatically based on class frequency: {:.3f}".format(baseline_weight))
+
+    else:
+        if not isinstance(baseline_weight, (int, float)):
+            raise ValueError("baseline_weight must be a float or 'auto'")
+        elif not isinstance(non_baseline_weight, (int, float)):
+            raise ValueError("non_baseline_weight must be a float")
+        
+        if verbose:
+            print("Assigning baseline sample weight: {:.3f} and non-baseline sample weight: {:.3f}".format(baseline_weight, non_baseline_weight))
+
+
+    weights[y == 1] = float(baseline_weight)
+    weights[y == 0] = float(non_baseline_weight)
+    
+    return weights
 
 def train_mlp(site,
             balance=0.5,
             balance_method="random",
             undersample=0,
-            time_shift_hours=[6],
-            mlp_params=None,):
+            sample_weights=None,
+            time_shift_hours=[6], prediction_threshold=0.5,
+            mlp_params=None, return_scores=False, verbose=True):
     """ Train a MLP model for a given site.
 
     Args:
@@ -201,32 +237,40 @@ def train_mlp(site,
             values in the training data. Must be between 0 and 1. Only applied to training data.
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
         undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
+        sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         mlp_params (dict): A dictionary of hyperparameters to pass to the MLPClassifier. If None, default parameters will be used.
+        return_scores (bool): Whether to return the evaluation scores as a dictionary.
+        verbose (bool): Whether to print verbose output.
     Returns:
         MLPClassifier: The trained MLP model.
     """
 
     # Get the training data
-    print(f"Training MLP model for site: {site}")
+    if verbose: print(f"Training MLP model for site: {site}")
     X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
                                time_shift_hours=time_shift_hours, undersample=undersample)
+    
+    if sample_weights is not None:
+        if verbose: print("Calculating sample weights...")
+        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
 
-    print(f"Number of training points: {len(y)}")
-    print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+    if verbose:
+        print(f"Number of training points: {len(y)}")
+        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
     nn_model = MLPClassifier(**mlp_params, random_state=42)
 
     # Fit the model
-    print("... fitting")
-    nn_model.fit(X, y)
+    if verbose: print("... fitting")
+    if sample_weights is not None:
+        nn_model.fit(X, y, sample_weight=weights)
+    else:
+        nn_model.fit(X, y)
 
     # Validation
     X_val, y_val = get_train_test_data(site, "validation",
-                                       balance=balance,
-                                       balance_method=balance_method,
-                                       time_shift_hours=time_shift_hours,
-                                       undersample=undersample)
+                                       time_shift_hours=time_shift_hours)
 
     # Testing
     #TODO: Testing on unbalanced data?
@@ -234,10 +278,16 @@ def train_mlp(site,
                                          time_shift_hours=time_shift_hours,
                                          )
 
-    print("... predicting")
-    y_pred_val = nn_model.predict(X_val)
-    y_pred_train = nn_model.predict(X)
-    y_pred_test = nn_model.predict(X_test)
+    if verbose: print("... predicting")
+    if prediction_threshold != 0.5:
+        print("doing this???")
+        y_pred_val = (nn_model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
+        y_pred_train = (nn_model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
+        y_pred_test = (nn_model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
+    else:
+        y_pred_val = nn_model.predict(X_val)
+        y_pred_train = nn_model.predict(X)
+        y_pred_test = nn_model.predict(X_test)
 
     # calculating scores
     precision_val = precision_score(y_val, y_pred_val)
@@ -251,17 +301,32 @@ def train_mlp(site,
     f1_train = f1_score(y, y_pred_train)
     f1_test = f1_score(y_test, y_pred_test)
 
-    print(f"Precision on Training Set = {precision_train:.3f}")
-    print(f"Precision on Validation Set = {precision_val:.3f}")
-    print(f"Precision on Test Set = {precision_test:.3f}")
-    print(f"Recall on Training Set = {recall_train:.3f}")
-    print(f"Recall on Validation Set = {recall_val:.3f}")
-    print(f"Recall on Test Set = {recall_test:.3f}")
-    print(f"F1 Score on Training Set = {f1_train:.3f}")
-    print(f"F1 Score on Validation Set = {f1_val:.3f}")
-    print(f"F1 Score on Test Set = {f1_test:.3f}")
+    if verbose:
+        print(f"Precision on Training Set = {precision_train:.3f}")
+        print(f"Precision on Validation Set = {precision_val:.3f}")
+        print(f"Precision on Test Set = {precision_test:.3f}")
+        print(f"Recall on Training Set = {recall_train:.3f}")
+        print(f"Recall on Validation Set = {recall_val:.3f}")
+        print(f"Recall on Test Set = {recall_test:.3f}")
+        print(f"F1 Score on Training Set = {f1_train:.3f}")
+        print(f"F1 Score on Validation Set = {f1_val:.3f}")
+        print(f"F1 Score on Test Set = {f1_test:.3f}")
 
-    return nn_model, X, y
+    if return_scores: 
+        scores = {
+            "precision_train": precision_train,
+            "precision_val": precision_val,
+            "precision_test": precision_test,
+            "recall_train": recall_train,
+            "recall_val": recall_val,
+            "recall_test": recall_test,
+            "f1_train": f1_train,
+            "f1_val": f1_val,
+            "f1_test": f1_test
+        }
+        return nn_model, X, y, scores
+    else:
+        return nn_model, X, y
 
 
 def train_mlp_grid_search(site,
