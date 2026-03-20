@@ -223,10 +223,8 @@ def train_mlp(site,
 
     # Validation
     X_val, y_val = get_train_test_data(site, "validation",
-                                       balance=balance,
-                                       balance_method=balance_method,
                                        time_shift_hours=time_shift_hours,
-                                       undersample=undersample)
+                                       )
 
     # Testing
     #TODO: Testing on unbalanced data?
@@ -280,14 +278,14 @@ def train_mlp_grid_search(site,
     
     if param_grid is None:
         param_grid = {
-            'hidden_layer_sizes': [ (50), (100,)],
+            'hidden_layer_sizes': [ (50),],
             'activation': ['relu'],
             'solver': ['adam'],
             'alpha': [0.0001],
             'learning_rate': ['constant'],
-            'batch_size': [50],
+            'batch_size': [5, 10],
             'max_iter': [1000],
-            'early_stopping': [False],
+            'early_stopping': [True],
             'shuffle': [False]
             # 'activation': ['relu'],
             # 'solver': ['adam'],
@@ -298,59 +296,58 @@ def train_mlp_grid_search(site,
             # 'early_stopping': [True, False]
         }
 
-    X_val, y_val = get_train_test_data(site, "validation", time_shift_hours=time_shift_hours)
+    X_val, y_val = get_train_test_data(site, "validation",
+                                       time_shift_hours=time_shift_hours)
 
     best_params = []
     best_scores = []
-    best_balances = []
+    #best_balances = []
 
-    for balance in np.arange(0.2, 0.9, 0.1):
+    # for balance in np.arange(0.2, 0.9, 0.1):
 
-        #TODO: Could also do undersampling instead of balancing, or both?
-        # and could also do different balance methods (random vs deterministic)
-        X_train, y_train = get_train_test_data(site, "train", balance=balance,
-                                            balance_method="deterministic",
-                                            time_shift_hours=time_shift_hours)
+    #TODO: Could also do undersampling instead of balancing, or both?
+    # and could also do different balance methods (random vs deterministic)
+    X_train, y_train = get_train_test_data(site, "train", balance=-1,
+                                        #balance_method="deterministic",
+                                        time_shift_hours=time_shift_hours)
 
-        # Combine your training and validation sets
-        X_all = pd.concat([X_train, X_val])
-        y_all = pd.concat([y_train, y_val])
+    # Combine your training and validation sets
+    X_all = pd.concat([X_train, X_val])
+    y_all = pd.concat([y_train, y_val])
 
-        # Create a test_fold array: assign -1 for training rows and 0 for validation rows
-        test_fold = [-1] * len(X_train) + [0] * len(X_val)
-        ps = PredefinedSplit(test_fold=test_fold)
+    # Create a test_fold array: assign -1 for training rows and 0 for validation rows
+    test_fold = [-1] * len(X_train) + [0] * len(X_val)
+    ps = PredefinedSplit(test_fold=test_fold)
 
-        grid_search = GridSearchCV(
-            MLPClassifier(random_state=42),
-            param_grid,
-            scoring="f1",
-            cv=ps,
-            refit=False, 
-            verbose=2,
-            n_jobs=-1
-        )
+    grid_search = GridSearchCV(
+        MLPClassifier(random_state=42),
+        param_grid,
+        scoring="f1",
+        cv=ps,
+        refit=False, 
+        verbose=2,
+        n_jobs=-1
+    )
 
-        print(f"Training MLP model for site: {site} with grid search...")
-        grid_search.fit(X_all, y_all)
+    print(f"Training MLP model for site: {site} with grid search...")
+    grid_search.fit(X_all, y_all)
 
-        print("Best parameters found: ", grid_search.best_params_)
-        print("Best score: ", grid_search.best_score_)
+    print("Best parameters found: ", grid_search.best_params_)
+    print("Best score: ", grid_search.best_score_)
 
-        best_params.append(grid_search.best_params_)
-        best_scores.append(grid_search.best_score_)
-        best_balances.append(balance)
+    best_params.append(grid_search.best_params_)
+    best_scores.append(grid_search.best_score_)
 
     # Find the best combination across all balances
     best_index = best_scores.index(max(best_scores))
     best_best_params = best_params[best_index]
-    best_balance = best_balances[best_index]
+    # best_balance = best_balances[best_index]
 
-    print(f"Best balance {best_balance}")
+    # print(f"Best balance {best_balance}")
     print(f"Best parameters across all balances: {best_best_params}")
 
     # Train final model with the best balance and parameters
-    X_train_final, y_train_final = get_train_test_data(site, "train", balance=best_balance,
-                                                      balance_method="deterministic",
+    X_train_final, y_train_final = get_train_test_data(site, "train",
                                                       time_shift_hours=time_shift_hours)
     
     best_model = MLPClassifier(random_state=42, **best_best_params)
@@ -372,3 +369,6 @@ def train_mlp_grid_search(site,
     # joblib.dump(best_model, Path(cfg.models_path) / f"best_mlp{met_str}_{site}.joblib")
 
     return best_model, best_best_params, best_balance
+
+
+#train_mlp_grid_search("MHD")
