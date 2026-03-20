@@ -333,6 +333,7 @@ def preprocess_all_features_arco_era5(force=False):
 def open_features(site,
                 start_year=1978,
                 end_year=2024,
+                time_shift_hours=[6],
                 features_dir=""):
     """Opens the preprocessed features for a given site.
 
@@ -340,6 +341,7 @@ def open_features(site,
         site (str): Site code.
         start_year (int): Start year to retrieve data (inclusive).
         end_year (int): End year for to retrieve data (inclusive).
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         features_dir (str): Directory where the features files are located if not in location specified in config. 
             Mainly used for testing purposes. If empty, uses default path.
 
@@ -396,19 +398,18 @@ def open_features(site,
 
     df = pd.concat(dfs, axis=0)
 
-    # Create a shifted copy: subtract 6 hours from time by equivalently shifting the index forward by 6 hours.
-    # For each record at time T, the _past columns will come from time T – 6 hours.
-    df_past = df.copy()
-    df_past.index = df_past.index + pd.Timedelta(hours=6)
-    df_past = df_past.add_suffix("_6h")
-
-    # Merge the current and past dataframes on their time index
-    df_final = pd.merge(df, df_past, left_index=True, right_index=True, how="left")
+    # Create time-shifted features, if specified
+    if time_shift_hours:
+        shifted_dfs = [
+            df.shift(shift, freq="h").add_suffix(f"_{shift}h")
+            for shift in time_shift_hours
+        ]
+        df = df.join(shifted_dfs, how="left")
 
     # Add hour of day column
-    df_final["hour_of_day"] = df_final.index.hour
+    df["hour_of_day"] = df.index.hour
 
-    return df_final
+    return df
 
 
 if __name__ == "__main__":

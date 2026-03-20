@@ -2,7 +2,7 @@
     "MHD": {
         "name": "Mace Head, Ireland",
         "coords": [53.3267, -9.9046],
-        "training_period": [2018, 2018],
+        "training_period": [2016, 2018],
         "validation_period": [2019, 2019],
         "testing_period": [2020, 2023]
     },
