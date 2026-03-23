@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 
 from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.ensemble import GradientBoostingClassifier
 
 from ml_baselines.data import read_intem
 from ml_baselines.config import Config
@@ -334,6 +336,120 @@ def train_mlp(site,
         return nn_model, X, y, scores
     else:
         return nn_model, X, y
+
+def train_baseline_model(site, model_type="mlp",
+            balance=0.5,
+            balance_method="random",
+            undersample=0,
+            sample_weights=None,
+            time_shift_hours=[6], prediction_threshold=0.5,
+            model_params=None, return_scores=False, verbose=True):
+    """ Train a model to classify baseline events for a given site.
+
+    Args:
+        site (str): The site for which to train the model.
+        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting". Note that the model_params need to be appropriate for the chosen model type  
+        balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. Only applied to training data.
+        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
+        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
+        sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
+        model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
+        return_scores (bool): Whether to return the evaluation scores as a dictionary.
+        verbose (bool): Whether to print verbose output.
+    Returns:
+        Model: The trained model.
+    """
+
+    # Get the training data
+    if verbose: print(f"Training {model_type} model for site: {site}")
+    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
+                               time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
+    
+    if sample_weights is not None:
+        if verbose: print("Calculating sample weights...")
+        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
+
+    if verbose:
+        print(f"Number of training points: {len(y)}")
+        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+
+    ## need to add default model_params! 
+    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
+    if model_type not in valid_model_types:
+        raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
+    if model_type == "mlp":
+        model = MLPClassifier(**model_params, random_state=42)
+    elif model_type == "random_forest":
+        model = RandomForestClassifier(**model_params, random_state=42)
+    elif model_type == "gradient_boosting":
+        model = GradientBoostingClassifier(**model_params, random_state=42)
+    
+    # Fit the model
+    if verbose: print("... fitting")
+    if sample_weights is not None:
+        model.fit(X, y, sample_weight=weights)
+    else:
+        model.fit(X, y)
+
+    # Validation
+    X_val, y_val = get_train_test_data(site, "validation",
+                                       time_shift_hours=time_shift_hours, verbose=verbose)
+
+    # Testing
+    #TODO: Testing on unbalanced data?
+    X_test, y_test = get_train_test_data(site, "test",
+                                         time_shift_hours=time_shift_hours, verbose=verbose)
+                                         
+
+    if verbose: print("... predicting")
+    if prediction_threshold != 0.5:
+        print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
+    y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
+
+    # calculating scores
+    precision_val = precision_score(y_val, y_pred_val)
+    precision_train = precision_score(y, y_pred_train)
+    precision_test = precision_score(y_test, y_pred_test)
+    recall_val = recall_score(y_val, y_pred_val)
+    recall_train = recall_score(y, y_pred_train)
+    recall_test = recall_score(y_test, y_pred_test)
+
+    f1_val = f1_score(y_val, y_pred_val)
+    f1_train = f1_score(y, y_pred_train)
+    f1_test = f1_score(y_test, y_pred_test)
+
+    if verbose:
+        print(f"Precision on Training Set = {precision_train:.3f}")
+        print(f"Precision on Validation Set = {precision_val:.3f}")
+        print(f"Precision on Test Set = {precision_test:.3f}")
+        print(f"Recall on Training Set = {recall_train:.3f}")
+        print(f"Recall on Validation Set = {recall_val:.3f}")
+        print(f"Recall on Test Set = {recall_test:.3f}")
+        print(f"F1 Score on Training Set = {f1_train:.3f}")
+        print(f"F1 Score on Validation Set = {f1_val:.3f}")
+        print(f"F1 Score on Test Set = {f1_test:.3f}")
+
+    if return_scores: 
+        scores = {
+            "precision_train": precision_train,
+            "precision_val": precision_val,
+            "precision_test": precision_test,
+            "recall_train": recall_train,
+            "recall_val": recall_val,
+            "recall_test": recall_test,
+            "f1_train": f1_train,
+            "f1_val": f1_val,
+            "f1_test": f1_test
+        }
+        return model, X, y, scores
+    else:
+        return model, X, y
+
+
+
 
 
 def train_mlp_grid_search(site,
