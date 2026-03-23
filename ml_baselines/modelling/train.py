@@ -19,7 +19,7 @@ def get_train_test_data(site, test_train,
                         undersample=0,
                         time_shift_hours=[6],
                         return_dataframe=False,
-                        balance_method="random"):
+                        balance_method="random", verbose=True):
     """ Get the training, testing or validation data for a given site.
 
     Args:
@@ -32,7 +32,7 @@ def get_train_test_data(site, test_train,
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
-
+        verbose (bool): If True, print verbose output.
     Returns:
         pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
                                 If return_dataframe is False, returns a tuple (X, y) where X is the features and y is the target.
@@ -78,7 +78,7 @@ def get_train_test_data(site, test_train,
 
     # Balance the dataset if required FOR TRAINING DATA ONLY
     if balance > 0. and test_train == "train":
-        print(f"... balancing dataset to target baseline ratio of {balance}")
+        if verbose: print(f"... balancing dataset to target baseline ratio of {balance}")
         if balance > 1:
             raise ValueError("Balance must be between 0 and 1.")
         # If balance is True, balance the dataset
@@ -86,7 +86,7 @@ def get_train_test_data(site, test_train,
 
     # Undersample the dataset if required FOR TRAINING DATA ONLY
     if undersample and test_train == "train":
-        print(f"... undersampling dataset to fraction {undersample}")
+        if verbose: print(f"... undersampling dataset to fraction {undersample}")
         if not (0. < undersample <= 1.):
             raise ValueError("Undersample must be a float between 0 and 1.")
         # Randomly undersample the dataset
@@ -202,6 +202,9 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     """
     weights = pd.Series(np.ones_like(y, dtype=float), index=y.index)
     if baseline_weight == "auto":
+        if np.sum(y == 1) == 0:
+            raise ValueError("Cannot set baseline_weight to 'auto' because there are no baseline samples (1s) in y!")
+        
         baseline_weight = 1.0 / (y == 1).mean()
         non_baseline_weight = 1.0
         if verbose:
@@ -212,6 +215,8 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
             raise ValueError("baseline_weight must be a float or 'auto'")
         elif not isinstance(non_baseline_weight, (int, float)):
             raise ValueError("non_baseline_weight must be a float")
+        elif baseline_weight < 0 or non_baseline_weight < 0:
+            raise ValueError("baseline_weight and non_baseline_weight must be non-negative")
         
         if verbose:
             print("Assigning baseline sample weight: {:.3f} and non-baseline sample weight: {:.3f}".format(baseline_weight, non_baseline_weight))
@@ -249,7 +254,7 @@ def train_mlp(site,
     # Get the training data
     if verbose: print(f"Training MLP model for site: {site}")
     X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
-                               time_shift_hours=time_shift_hours, undersample=undersample)
+                               time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
     if sample_weights is not None:
         if verbose: print("Calculating sample weights...")
@@ -258,6 +263,8 @@ def train_mlp(site,
     if verbose:
         print(f"Number of training points: {len(y)}")
         print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+
+    ## need to add default mlp_params! 
 
     nn_model = MLPClassifier(**mlp_params, random_state=42)
 
@@ -270,17 +277,17 @@ def train_mlp(site,
 
     # Validation
     X_val, y_val = get_train_test_data(site, "validation",
-                                       time_shift_hours=time_shift_hours)
+                                       time_shift_hours=time_shift_hours, verbose=verbose)
 
     # Testing
     #TODO: Testing on unbalanced data?
     X_test, y_test = get_train_test_data(site, "test",
-                                         time_shift_hours=time_shift_hours,
-                                         )
+                                         time_shift_hours=time_shift_hours, verbose=verbose)
+                                         
 
     if verbose: print("... predicting")
     if prediction_threshold != 0.5:
-        print("doing this???")
+        print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
         y_pred_val = (nn_model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
         y_pred_train = (nn_model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
         y_pred_test = (nn_model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
