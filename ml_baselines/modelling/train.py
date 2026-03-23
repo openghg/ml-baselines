@@ -305,7 +305,7 @@ def train_mlp_grid_search(site,
 
     if param_grid is None:
         param_grid = {
-            'hidden_layer_sizes': [(50),],
+            'hidden_layer_sizes': [(50,),],
             'activation': ['relu'],
             'solver': ['adam'],
             'alpha': [0.0001],
@@ -337,6 +337,8 @@ def train_mlp_grid_search(site,
         val_kw = {k: combo_kw[k] for k in validation_keys if k in combo_kw}
         X_train, y_train = get_train_test_data(site, "train", **combo_kw)
         X_val, y_val = get_train_test_data(site, "validation", **val_kw)
+
+        assert set(X_train.columns) == set(X_val.columns), "Feature columns in training and validation sets do not match. Check that the data kwargs affecting features are included in validation_keys."
 
         # Combine training and validation sets; use PredefinedSplit so validation
         # rows are never used for fitting during cross-validation
