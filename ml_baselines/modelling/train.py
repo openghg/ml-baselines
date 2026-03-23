@@ -404,7 +404,7 @@ def train_baseline_model(site, model_type="mlp",
 
     if verbose: print("... predicting")
     if prediction_threshold != 0.5:
-        print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
+        if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
     y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
     y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
     y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
