@@ -271,8 +271,9 @@ def train_mlp(site,
 
     if mlp_params is None:
         mlp_params = {}
-        print(f"Number of training points: {len(y)}")
-        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+      
+    if verbose: print(f"Number of training points: {len(y)}")
+    if verbose: print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
     nn_model = MLPClassifier(**mlp_params, random_state=42)
 
