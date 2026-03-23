@@ -243,6 +243,8 @@ def train_mlp(site,
             values in the training data. Must be between 0 and 1. Only applied to training data.
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
         undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
+        sample_weights (float or str): If a float, the weight to assign to the baseline class (1s) during training. If "auto", it will be set to 1/class_frequency. 
+            If None, no sample weights will be used. Only applied to training data.
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         prediction_threshold (float): Decision threshold in the range [0, 1] applied to the
             predicted probabilities (e.g., from ``predict_proba``) to classify examples as positive.
@@ -267,13 +269,10 @@ def train_mlp(site,
         if verbose: print("Calculating sample weights...")
         weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
 
-
     if mlp_params is None:
         mlp_params = {}
         print(f"Number of training points: {len(y)}")
         print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
-
-    ## need to add default mlp_params! 
 
     nn_model = MLPClassifier(**mlp_params, random_state=42)
 
