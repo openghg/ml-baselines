@@ -199,7 +199,7 @@ class BaselineLabelledObservations:
         
     def plot_obs(self, title=None):
         if title is None:
-            title = f"MF of {self.species.upper()} at {self.site} with InTEM baseline Predictions"
+            title = f"MF of {self.species.upper()} at {self.site} with InTEM baseline labels"
         plot_obs(self.labelled_df, title=title)
 
     def plot_obs_with_labels(self, title=None, plot_true_negatives=True):
