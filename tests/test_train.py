@@ -1,6 +1,19 @@
 import numpy as np
+from pandas import Series
 
-from ml_baselines.modelling.train import balance_dataset
+from ml_baselines.modelling.train import balance_dataset, generate_sample_weights
+
+
+def test_generate_sample_weights():
+    # Test the generate_sample_weights function
+    y = Series([0, 0, 1, 1, 1])
+    weights = generate_sample_weights(y, baseline_weight="auto", verbose=False)
+    assert np.isclose(weights[y == 1].iloc[0], 1.0 / (y == 1).mean()), "Baseline weight is not set correctly for 'auto'"
+    assert np.isclose(weights[y == 0].iloc[0], 1.0), "Non-baseline weight is not set correctly for 'auto'"
+
+    weights = generate_sample_weights(y, baseline_weight=2.0, non_baseline_weight=0.5, verbose=False)
+    assert np.isclose(weights[y == 1].iloc[0], 2.0), "Baseline weight is not set correctly for specified float"
+    assert np.isclose(weights[y == 0].iloc[0], 0.5), "Non-baseline weight is not set correctly for specified float"
 
 
 def test_balance_dataset():
