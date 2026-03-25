@@ -174,7 +174,21 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
 class BaselineLabelledObservations:
     def __init__(self, y, y_pred, df_obs, site, species):
         """
-        Object to hold observed molefractions along with true and predicted baseline labels, and provide methods for plotting these observations the labels.
+        Object to hold observed molefractions along with true and predicted baseline labels, and provide methods for plotting these observations the labels. Also provides a method to calculate monthly means of the observed molefractions for true and predicted baselines.
+
+        Parameters:
+        - y: The true labels (observed baselines) as a pandas Series with a datetime index.
+        - y_pred: The predicted labels (predicted baselines) pandas Series with a datetime
+        index.
+        - df_obs: A DataFrame containing the observed molefractions in a column named "mf" with a datetime index. Use read_agage to read in the observed data.
+        - site: the site the obs and baselines refer to
+        - species: the species the obs refer to
+
+        Attributes:
+        - labelled_df: A DataFrame containing the observed molefractions, true baseline labels,
+        and predicted baseline labels, all aligned by their datetime index.
+        - monthly_means: A DataFrame containing the monthly mean molefractions. The attribute is calculated using the calculate_monthly_means method
+
         """
         self.site = site
         self.species = species
