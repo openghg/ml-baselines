@@ -6,7 +6,6 @@ import pandas as pd
 import matplotlib.dates as mdates
 
 from ml_baselines.config import Config
-from ml_baselines.modelling.predict import align_predictions_and_obs, calculate_monthly_means
 
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
@@ -215,59 +214,3 @@ def plot_baseline_count_hist(monthly_means, ax=None):
 
 
 
-class BaselineLabelledObservations:
-    def __init__(self, y, y_pred, df_obs, site, species):
-        """
-        Object to hold observed molefractions along with true and predicted baseline labels, and provide methods for plotting these observations the labels. Also provides a method to calculate monthly means of the observed molefractions for true and predicted baselines.
-
-        Parameters:
-        - y: The true labels (observed baselines) as a pandas Series with a datetime index.
-        - y_pred: The predicted labels (predicted baselines) pandas Series with a datetime
-        index.
-        - df_obs: A DataFrame containing the observed molefractions in a column named "mf" with a datetime index. Use read_agage to read in the observed data.
-        - site: the site the obs and baselines refer to
-        - species: the species the obs refer to
-
-        Attributes:
-        - labelled_df: A DataFrame containing the observed molefractions, true baseline labels,
-        and predicted baseline labels, all aligned by their datetime index.
-        - monthly_means: A DataFrame containing the monthly mean molefractions. The attribute is calculated using the calculate_monthly_means method
-
-        """
-        self.site = site
-        self.species = species
-        self.labelled_df = align_predictions_and_obs(y, y_pred, df_obs)
-        
-    def plot_confusion_matrix(self, normalise=True, title="Confusion Matrix"):
-        plot_confusion_matrix(self.labelled_df["baseline"], self.labelled_df["predicted_baseline"], normalise=normalise, title=title)
-        
-    def plot_obs(self, title=None):
-        if title is None:
-            title = f"MF of {self.species.upper()} at {self.site} with InTEM baseline labels"
-        plot_obs(self.labelled_df, title=title)
-
-    def plot_obs_with_labels(self, title=None, plot_true_negatives=True):
-        if title is None:
-            title = f"MF of {self.species.upper()} at {self.site} with baseline and model Predictions"
-        plot_obs_with_labels(self.labelled_df, title=title, site=self.site, plot_true_negatives=plot_true_negatives)
-
-    def calculate_monthly_means(self):
-        if not hasattr(self, "monthly_means"):
-            self.monthly_means = calculate_monthly_means(self.labelled_df)
-        else:
-            print("Monthly means have already been calculated. Use the 'monthly_means' attribute to access the DataFrame containing these means.")
-
-
-    def plot_monthly_means(self, shade_train_and_val_periods=True, plot_obs=True, plot_count_hist=False):
-        if not hasattr(self, "monthly_means"):
-            self.calculate_monthly_means()
-
-        obs_df = self.labelled_df if plot_obs else None
-
-        plot_monthly_means(self.monthly_means, shade_train_and_val_periods=shade_train_and_val_periods, site=self.site, obs_df=obs_df, plot_count_hist=plot_count_hist)
-
-    def plot_baseline_count_hist(self):
-        if not hasattr(self, "monthly_means"):
-            self.calculate_monthly_means()
-
-        plot_baseline_count_hist(self.monthly_means)
