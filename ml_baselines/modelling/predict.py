@@ -86,11 +86,13 @@ def calculate_monthly_means(labelled_df):
 
     ## TODO print a warning if there are months with no predicted or true baselines
 
-    monthly_pred_mean = df_pred.resample('ME').agg({'mf': 'mean'})
-    monthly_pred_std = df_pred.resample('ME').agg({'mf': 'std'})
-    monthly_true_mean = df_true.resample('ME').agg({'mf': 'mean'})
-    monthly_true_std = df_true.resample('ME').agg({'mf': 'std'})
-    monthly_means = pd.concat([monthly_pred_mean, monthly_pred_std, monthly_true_mean, monthly_true_std], axis=1)
-    monthly_means.columns = ["pred_monthly_mf", "pred_monthly_std", "true_monthly_mf", "true_monthly_std"]
-    monthly_means.index = monthly_means.index.to_period('M').to_timestamp()
+    monthly_pred = df_pred.resample("ME").agg({"mf": ["mean", "std", "count"]})
+    monthly_true = df_true.resample("ME").agg({"mf": ["mean", "std", "count"]})
+
+    monthly_pred.columns = ["pred_monthly_mf", "pred_monthly_std", "pred_monthly_count"]
+    monthly_true.columns = ["true_monthly_mf", "true_monthly_std", "true_monthly_count"]
+
+    monthly_means = pd.concat([monthly_pred, monthly_true], axis=1)
+    monthly_means.index = monthly_means.index.to_period("M").to_timestamp()
+
     return monthly_means
