@@ -9,6 +9,7 @@ from ml_baselines.config import Config
 
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
+from matplotlib.colors import LinearSegmentedColormap
 
 cfg = Config()
 
@@ -57,7 +58,7 @@ def plot_obs_with_labels(labelled_df, shade_train_and_val_periods=True, title=""
         ax.scatter(labelled_df.index[true_negatives_mask], labelled_df.mf[true_negatives_mask], color="lightcoral", label="Correctly predicted as non-baseline (True Negatives)", zorder=5, s=0.5, alpha=0.5, marker='x')
 
     ax.scatter(labelled_df.index[false_positives_mask], labelled_df.mf[false_positives_mask], color="firebrick", label="Incorrectly predicted as baseline (False Positives)", zorder=5, s=0.5, marker='x')
-    ax.scatter(labelled_df.index[false_negatives_mask], labelled_df.mf[false_negatives_mask], color="mediumaquamarine", label="Missed label (False Negatives)", zorder=5, s=0.5, marker='x', alpha=1)
+    ax.scatter(labelled_df.index[false_negatives_mask], labelled_df.mf[false_negatives_mask], color="mediumaquamarine", label="Missed baseline label (False Negatives)", zorder=5, s=0.5, marker='x', alpha=0.8)
     ax.scatter(labelled_df.index[true_positives_mask], labelled_df.mf[true_positives_mask], color="darkgreen", label="Correctly predicted as baseline (True Positives)", zorder=5, s=0.5, marker='x', alpha=0.8)
 
     ax.legend(markerscale=6)
@@ -121,7 +122,61 @@ def plot_obs(labelled_df, labels_from="InTEM", title=""):
     ax.set_title(title)
     plt.show()
 
-def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=None, obs_df=None, plot_count_hist=False):
+
+
+def plot_model_confidence(labelled_df, title="", cmap=None, shade_train_and_val_periods=True, site=None):
+    if "predicted_proba" not in labelled_df.columns:
+        raise ValueError("Predicted probabilities are not available in the labelled_df. Please ensure that the predict_baselines function is called with return_proba=True, and that the resulting y_proba is included in the BaselineLabelledObservations object.")
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.plot(labelled_df.index, labelled_df.mf, c="gray", label="AGAGE Observations", zorder=1, lw=0.5, alpha=0.5)  
+
+    ## make the color depend on the predicted probability of being a baseline, with a colormap from lightcoral (low probability) to darkgreen (high probability)    
+    if cmap is None:
+        baseline_cmap = LinearSegmentedColormap.from_list(
+            "baseline_prob_cmap",
+            ["lightcoral", "darkgreen"]
+        )
+    elif isinstance(cmap, str):
+        baseline_cmap = plt.get_cmap(cmap)
+
+    plot_df = labelled_df.sort_values("predicted_proba")
+
+    sc = ax.scatter(
+        plot_df.index,
+        plot_df.mf,
+        c=plot_df["predicted_proba"],
+        cmap=baseline_cmap,
+        vmin=0.0,
+        vmax=1.0,
+        zorder=5,
+        s=0.5,
+        marker="x",
+        alpha=0.9,
+        label="Points colored by predicted baseline probability"
+    )
+
+    cbar = plt.colorbar(sc, ax=ax, pad=0.01)
+    cbar.set_label("Predicted baseline probability")
+
+    if shade_train_and_val_periods:
+        if site is not None:
+            ax.axvspan(pd.to_datetime(f"{cfg.training_period[site][0]}-01-01"), pd.to_datetime(f"{cfg.training_period[site][1]}-12-31"), alpha=0.1, label="Training Set", color='grey', zorder=0)
+            ax.axvspan(pd.to_datetime(f"{cfg.validation_period[site][0]}-01-01"), pd.to_datetime(f"{cfg.validation_period[site][1]}-12-31"), alpha=0.1, label="Validation Set", color='purple', zorder=0)
+        else:
+            print("Could not shade training and validation periods because site is None. Please provide a site name to shade these periods.")
+
+
+    ax.set_title(title if title else "Model confidence over observations")
+    ax.set_ylabel("mole fraction in air / ppt")
+    ax.set_xlabel("Time")
+    ax.legend(loc="upper left")
+
+    plt.show()
+
+
+def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=None, obs_df=None, plot_count_hist=False, show_anomalies=False):
     """
     plot monthly means of the observed molefractions, and one standard deviation. Generate the dataset for this plot using the calculate_monthly_means function.
 
@@ -178,6 +233,18 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
         ax2 = ax.twinx()
         plot_baseline_count_hist(monthly_means, ax=ax2)
         ax2.set_ylabel("Baseline count")
+
+    # the anomaly is plotted as a triangle pointed to the observation, deviated by a fixed factor for visibility. The size of the triangle is scaled by the deviation threshold (e.g., 3, 5 std)
+    deviation = monthly_means["true_monthly_mf"].iloc[0] * 0.05
+
+
+    if show_anomalies and hasattr(monthly_means, "is_anomaly"):
+        for threshold in np.unique(monthly_means["is_anomaly"]):
+            if threshold > 0:
+                anomaly_months = monthly_means[monthly_means["is_anomaly"] == threshold]
+
+                ax.scatter(anomaly_months.index, anomaly_months["true_monthly_mf"] - deviation , label=f"Anomalies > {threshold} std", color='red', marker='^', s=10*threshold, zorder=5)
+        
 
     ax.legend(loc="upper left")
 
