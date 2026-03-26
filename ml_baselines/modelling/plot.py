@@ -176,7 +176,7 @@ def plot_model_confidence(labelled_df, title="", cmap=None, shade_train_and_val_
     plt.show()
 
 
-def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=None, obs_df=None, plot_count_hist=False, show_anomalies=False):
+def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=None, obs_df=None, plot_count_hist=False, show_anomalies=False, title="Monthly Mean Molefractions for Predicted and True Baselines"):
     """
     plot monthly means of the observed molefractions, and one standard deviation. Generate the dataset for this plot using the calculate_monthly_means function.
 
@@ -210,7 +210,7 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
                     monthly_means["pred_monthly_mf"] + monthly_means["pred_monthly_std"],
                     color='royalblue', alpha=0.3, label="Predicted Baseline Monthly Std")
     
-    ax.set_title("Monthly Mean Molefractions for Predicted and True Baselines")
+    ax.set_title(title)
     ax.set_xlabel("Month")
     ax.set_ylabel("Mean Molefraction / ppt")
     

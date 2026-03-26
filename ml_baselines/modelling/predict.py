@@ -259,7 +259,7 @@ class BaselineLabelledObservations:
 
         obs_df = self.labelled_df if plot_obs else None
 
-        plot_monthly_means(self.monthly_means, shade_train_and_val_periods=shade_train_and_val_periods, site=self.site, obs_df=obs_df, plot_count_hist=plot_count_hist, show_anomalies=show_anomalies)
+        plot_monthly_means(self.monthly_means, shade_train_and_val_periods=shade_train_and_val_periods, site=self.site, obs_df=obs_df, plot_count_hist=plot_count_hist, show_anomalies=show_anomalies, title=f"Monthly Mean Molefractions for Predicted and True Baselines for {self.species.upper()} at {self.site}")
 
     def plot_baseline_count_hist(self):
         if not hasattr(self, "monthly_means"):
