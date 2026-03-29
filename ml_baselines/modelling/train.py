@@ -231,257 +231,6 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     return weights
 
 
-def train_mlp(site,
-            balance=0.5,
-            balance_method="random",
-            undersample=0,
-            sample_weights=None,
-            time_shift_hours=[6],
-            prediction_threshold=0.5,
-            mlp_params=None, return_scores=False, verbose=True):
-    """ Train a MLP model for a given site.
-
-    Args:
-        site (str): The site for which to train the model.
-        balance (float): The target ratio of baseline to non-baseline
-            values in the training data. Must be between 0 and 1. Only applied to training data.
-        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
-        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
-        sample_weights (float or str): If a float, the weight to assign to the baseline class (1s) during training. If "auto", it will be set to 1/class_frequency. 
-            If None, no sample weights will be used. Only applied to training data.
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        prediction_threshold (float): Decision threshold in the range [0, 1] applied to the
-            predicted probabilities (e.g., from ``predict_proba``) to classify examples as positive.
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        mlp_params (dict): A dictionary of hyperparameters to pass to the MLPClassifier. If None, default parameters will be used.
-    Returns:
-        tuple: A tuple containing:
-            - model (MLPClassifier): The trained MLP model.
-            - X (ndarray): The feature matrix used for training.
-            - y (ndarray): The target labels used for training.
-            If ``return_scores`` is True, a fourth element is returned:
-            - scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
-        verbose (bool): Whether to print verbose output.
-    """
-
-    # Get the training data
-    if verbose: print(f"Training MLP model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
-                               time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
-    
-    if sample_weights is not None:
-        if verbose: print("Calculating sample weights...")
-        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
-
-    if mlp_params is None:
-        mlp_params = {}
-      
-    if verbose: print(f"Number of training points: {len(y)}")
-    if verbose: print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
-
-    nn_model = MLPClassifier(**mlp_params, random_state=42)
-
-    # Fit the model
-    if verbose: print("... fitting")
-    if sample_weights is not None:
-        nn_model.fit(X, y, sample_weight=weights)
-    else:
-        nn_model.fit(X, y)
-
-    # Validation
-    X_val, y_val = get_train_test_data(site, "validation",
-                                       time_shift_hours=time_shift_hours, verbose=verbose)
-
-    # Testing
-    #TODO: Testing on unbalanced data?
-    X_test, y_test = get_train_test_data(site, "test",
-                                         time_shift_hours=time_shift_hours, verbose=verbose)
-                                         
-
-    if verbose: print("... predicting")
-    if prediction_threshold != 0.5:
-        print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
-        y_pred_val = (nn_model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
-        y_pred_train = (nn_model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
-        y_pred_test = (nn_model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
-    else:
-        y_pred_val = nn_model.predict(X_val)
-        y_pred_train = nn_model.predict(X)
-        y_pred_test = nn_model.predict(X_test)
-
-    # calculating scores
-    precision_val = precision_score(y_val, y_pred_val)
-    precision_train = precision_score(y, y_pred_train)
-    precision_test = precision_score(y_test, y_pred_test)
-    recall_val = recall_score(y_val, y_pred_val)
-    recall_train = recall_score(y, y_pred_train)
-    recall_test = recall_score(y_test, y_pred_test)
-
-    f1_val = f1_score(y_val, y_pred_val)
-    f1_train = f1_score(y, y_pred_train)
-    f1_test = f1_score(y_test, y_pred_test)
-
-    if verbose:
-        print(f"Precision on Training Set = {precision_train:.3f}")
-        print(f"Precision on Validation Set = {precision_val:.3f}")
-        print(f"Precision on Test Set = {precision_test:.3f}")
-        print(f"Recall on Training Set = {recall_train:.3f}")
-        print(f"Recall on Validation Set = {recall_val:.3f}")
-        print(f"Recall on Test Set = {recall_test:.3f}")
-        print(f"F1 Score on Training Set = {f1_train:.3f}")
-        print(f"F1 Score on Validation Set = {f1_val:.3f}")
-        print(f"F1 Score on Test Set = {f1_test:.3f}")
-
-    if return_scores: 
-        scores = {
-            "precision_train": precision_train,
-            "precision_val": precision_val,
-            "precision_test": precision_test,
-            "recall_train": recall_train,
-            "recall_val": recall_val,
-            "recall_test": recall_test,
-            "f1_train": f1_train,
-            "f1_val": f1_val,
-            "f1_test": f1_test
-        }
-        return nn_model, X, y, scores
-    else:
-        return nn_model, X, y
-
-
-def train_mlp_grid_search(site,
-                          param_grid=None,
-                          data_kwargs=None,
-                          validation_keys=None):
-    """ Train a MLP model using grid search for hyperparameter tuning.
-
-    The grid search explores both the MLP hyperparameters in ``param_grid`` and
-    all combinations of data-loading options supplied via ``data_kwargs``.
-
-    Args:
-        site (str): The site for which to train the model.
-        param_grid (dict, optional): A dictionary containing the MLPClassifier
-            hyperparameters to tune. If None, default values are used.
-        data_kwargs (dict, optional): A dictionary where each key is a keyword
-            argument accepted by :func:`get_train_test_data` and each value is a
-            list of options to explore. All combinations of options are tried.
-            For example::
-
-                {
-                    "balance": [-1, 0.5],
-                    "time_shift_hours": [[6], [6, 24]],
-                }
-
-            Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
-            and ``balance_method``. If None, defaults to
-            ``{"balance": [-1], "time_shift_hours": [[6]]}``.
-        validation_keys (list of str, optional): Keys from ``data_kwargs`` that
-            should also be forwarded when loading the validation set. Only
-            keywords that affect the feature representation (e.g.
-            ``"time_shift_hours"``) should be included here; training-only
-            options such as ``"balance"`` or ``"undersample"`` should be
-            omitted. If None, defaults to ``["time_shift_hours"]``.
-
-    Returns:
-        tuple: ``(best_model, best_mlp_params, best_data_kwargs)`` — the fitted
-            :class:`~sklearn.neural_network.MLPClassifier`, the winning MLP
-            hyperparameter dict, and the winning data-kwargs dict.
-    """
-
-    if param_grid is None:
-        param_grid = {
-            'hidden_layer_sizes': [(50,),],
-            'activation': ['relu'],
-            'solver': ['adam'],
-            'alpha': [0.0001],
-            'batch_size': [5, 10],
-            'max_iter': [1000],
-            'early_stopping': [True],
-            'shuffle': [False]
-        }
-
-    if data_kwargs is None:
-        data_kwargs = {"balance": [-1],
-                       "time_shift_hours": [[6]]}
-
-    if validation_keys is None:
-        validation_keys = ["time_shift_hours"]
-
-    # Build the cartesian product of all data-kwarg options
-    keys = list(data_kwargs.keys())
-    combos = list(itertools.product(*[data_kwargs[k] for k in keys]))
-
-    best_params_list = []
-    best_scores_list = []
-    best_data_kwargs_list = []
-
-    for combo in combos:
-        combo_kw = dict(zip(keys, combo))
-        print(f"... data kwargs: {combo_kw}")
-
-        val_kw = {k: combo_kw[k] for k in validation_keys if k in combo_kw}
-        X_train, y_train = get_train_test_data(site, "train", **combo_kw)
-        X_val, y_val = get_train_test_data(site, "validation", **val_kw)
-
-        assert set(X_train.columns) == set(X_val.columns), "Feature columns in training and validation sets do not match. Check that the data kwargs affecting features are included in validation_keys."
-
-        # Combine training and validation sets; use PredefinedSplit so validation
-        # rows are never used for fitting during cross-validation
-        X_all = pd.concat([X_train, X_val])
-        y_all = pd.concat([y_train, y_val])
-        test_fold = [-1] * len(X_train) + [0] * len(X_val)
-        ps = PredefinedSplit(test_fold=test_fold)
-
-        grid_search = GridSearchCV(
-            MLPClassifier(random_state=42),
-            param_grid,
-            scoring="f1",
-            cv=ps,
-            refit=False,
-            verbose=2,
-            n_jobs=-1
-        )
-
-        print(f"Training MLP model for site: {site} with grid search...")
-        grid_search.fit(X_all, y_all)
-
-        print("Best parameters found: ", grid_search.best_params_)
-        print("Best score: ", grid_search.best_score_)
-
-        best_params_list.append(grid_search.best_params_)
-        best_scores_list.append(grid_search.best_score_)
-        best_data_kwargs_list.append(combo_kw)
-
-    # Find the best combination across all data-kwarg combos
-    best_index = best_scores_list.index(max(best_scores_list))
-    best_best_params = best_params_list[best_index]
-    best_combo_kw = best_data_kwargs_list[best_index]
-
-    print(f"Best data kwargs: {best_combo_kw}")
-    print(f"Best MLP parameters: {best_best_params}")
-
-    # Train final model with the winning combination
-    best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
-    X_train_final, y_train_final = get_train_test_data(site, "train", **best_combo_kw)
-    X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
-
-    best_model = MLPClassifier(random_state=42, **best_best_params)
-    best_model.fit(X_train_final, y_train_final)
-
-    # Evaluate on validation set
-    pred_val = best_model.predict(X_val_final)
-
-    precision_val = precision_score(y_val_final, pred_val)
-    recall_val = recall_score(y_val_final, pred_val)
-    f1_val = f1_score(y_val_final, pred_val)
-
-    print(f"Validation Precision = {precision_val:.3f}")
-    print(f"Validation Recall = {recall_val:.3f}")
-    print(f"Validation F1 Score = {f1_val:.3f}")
-
-    return best_model, best_best_params, best_combo_kw
-
-
 def train_baseline_model(site, model_type="mlp",
             balance=0.5,
             balance_method="random",
@@ -503,11 +252,16 @@ def train_baseline_model(site, model_type="mlp",
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
         verbose (bool): Whether to print verbose output.
     Returns:
-        Model: The trained model.
+        model: The trained model.
+        X (ndarray): The feature matrix used for training.
+        y (ndarray): The target labels used for training.
+
+        If ``return_scores`` is True, a fourth element is returned:
+        scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
     """
 
     # Get the training data
-    if verbose: print(f"Training {model_type} model for site: {site}")
+    if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
     X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
@@ -519,7 +273,10 @@ def train_baseline_model(site, model_type="mlp",
         print(f"Number of training points: {len(y)}")
         print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
-    ## need to add default model_params! 
+    # If non-specified, use default hyperparameters
+    if model_params is None:
+        model_params = {}
+
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
         raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
@@ -547,7 +304,8 @@ def train_baseline_model(site, model_type="mlp",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
                                          
 
-    if verbose: print("... predicting")
+    if verbose:
+        print("... predicting")
     if prediction_threshold != 0.5:
         if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
     y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
@@ -592,3 +350,172 @@ def train_baseline_model(site, model_type="mlp",
         return model, X, y, scores
     else:
         return model, X, y
+
+
+def train_baseline_model_grid_search(site,
+                          model_type="mlp",
+                          scoring="f1",
+                          param_grid=None,
+                          data_kwargs=None,
+                          validation_keys=None):
+    """ Train a model to classify baseline events using grid search for hyperparameter tuning.
+
+    The grid search explores both the model hyperparameters in ``param_grid`` and
+    all combinations of data-loading options supplied via ``data_kwargs``.
+
+    Args:
+        site (str): The site for which to train the model.
+        model_type (str): The type of model to train. Currently accepts "mlp", 
+            "random_forest", or "gradient_boosting". Note that the param_grid
+            needs to be appropriate for the chosen model type. 
+        scoring (str): The metric being optimised for.
+        param_grid (dict, optional): A dictionary containing model
+            hyperparameters to tune. If None, default values are used.
+        data_kwargs (dict, optional): A dictionary where each key is a keyword
+            argument accepted by :func:`get_train_test_data` and each value is a
+            list of options to explore. All combinations of options are tried.
+            For example::
+
+                {
+                    "balance": [-1, 0.5],
+                    "time_shift_hours": [[6], [6, 24]],
+                }
+
+            Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
+            and ``balance_method``. If None, defaults to
+            ``{"balance": [-1], "time_shift_hours": [[6]]}``.
+        validation_keys (list of str, optional): Keys from ``data_kwargs`` that
+            should also be forwarded when loading the validation set. Only
+            keywords that affect the feature representation (e.g.
+            ``"time_shift_hours"``) should be included here; training-only
+            options such as ``"balance"`` or ``"undersample"`` should be
+            omitted. If None, defaults to ``["time_shift_hours"]``.
+
+    Returns:
+        tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
+            model, the winning hyperparameter dict, and the winning data-kwargs dict.
+    """
+
+    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
+    if model_type not in valid_model_types:
+        raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
+    if model_type == "mlp":
+        model = MLPClassifier(random_state=42)
+    elif model_type == "random_forest":
+        model = RandomForestClassifier(random_state=42)
+    elif model_type == "gradient_boosting":
+        model = GradientBoostingClassifier(random_state=42)
+
+    if param_grid is None:
+        if model_type == "mlp":
+            param_grid = {
+                'hidden_layer_sizes': [(50,),],
+                'activation': ['relu'],
+                'solver': ['adam'],
+                'alpha': [0.0001],
+                'batch_size': [5, 10],
+                'max_iter': [1000],
+                'early_stopping': [True],
+                'shuffle': [False]
+            }
+        if model_type == "random_forest":
+            param_grid = {
+                'n_estimators': [100, 50, 200,],
+                'criterion': ['gini', 'entropy',],
+                'max_depth': [None, 5, 10,],
+                'min_samples_split': [2, 5, 10,],
+                'max_features': ['log2', 'sqrt', None],
+                'bootstrap': [True, False],
+            }
+        if model_type == "gradient_boosting":
+            param_grid = {
+                'loss': ['log_loss', 'exponential'],
+                'learning_rate': [0.1, 0.2, 0.5,],
+                'n_estimators': [100, 50, 200],
+                'criterion': ['friedman_mse', 'squared_error'],
+                'min_samples_split': [2, 5, 10,],
+                'max_depth': [3, 5, 8, 10,],
+                'max_features': ['sqrt', 'log2'],  
+            }
+
+    if data_kwargs is None:
+        data_kwargs = {"balance": [-1],
+                       "time_shift_hours": [[6]]}
+
+    if validation_keys is None:
+        validation_keys = ["time_shift_hours"]
+
+    # Build the cartesian product of all data-kwarg options
+    keys = list(data_kwargs.keys())
+    combos = list(itertools.product(*[data_kwargs[k] for k in keys]))
+
+    best_params_list = []
+    best_scores_list = []
+    best_data_kwargs_list = []
+
+    for combo in combos:
+        combo_kw = dict(zip(keys, combo))
+        print(f"... data kwargs: {combo_kw}")
+
+        val_kw = {k: combo_kw[k] for k in validation_keys if k in combo_kw}
+        X_train, y_train = get_train_test_data(site, "train", **combo_kw)
+        X_val, y_val = get_train_test_data(site, "validation", **val_kw)
+
+        assert set(X_train.columns) == set(X_val.columns), "Feature columns in training and validation sets do not match. Check that the data kwargs affecting features are included in validation_keys."
+
+        # Combine training and validation sets; use PredefinedSplit so validation
+        # rows are never used for fitting during cross-validation
+        X_all = pd.concat([X_train, X_val])
+        y_all = pd.concat([y_train, y_val])
+        test_fold = [-1] * len(X_train) + [0] * len(X_val)
+        ps = PredefinedSplit(test_fold=test_fold)
+
+        grid_search = GridSearchCV(
+            model,
+            param_grid,
+            scoring=scoring,
+            cv=ps,
+            refit=False,
+            verbose=2,
+            n_jobs=-1
+        )
+
+        print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
+        grid_search.fit(X_all, y_all)
+
+        print("Best parameters found: ", grid_search.best_params_)
+        print("Best score: ", grid_search.best_score_)
+
+        best_params_list.append(grid_search.best_params_)
+        best_scores_list.append(grid_search.best_score_)
+        best_data_kwargs_list.append(combo_kw)
+
+    # Find the best combination across all data-kwarg combos
+    best_index = best_scores_list.index(max(best_scores_list))
+    best_best_params = best_params_list[best_index]
+    best_combo_kw = best_data_kwargs_list[best_index]
+
+    print(f"\nBest data kwargs: {best_combo_kw}")
+    print(f"Best {model_type.upper() if model_type == 'mlp' else model_type} parameters: {best_best_params}")
+
+    # Train final model with the winning combination
+    best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
+    X_train_final, y_train_final = get_train_test_data(site, "train", **best_combo_kw)
+    X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
+
+    best_model = model.__class__(random_state=42, **best_best_params)
+    best_model.fit(X_train_final, y_train_final)
+
+    # Evaluate on validation set
+    pred_val = best_model.predict(X_val_final)
+
+    precision_val = precision_score(y_val_final, pred_val)
+    recall_val = recall_score(y_val_final, pred_val)
+    f1_val = f1_score(y_val_final, pred_val)
+
+    print("Validation metrics of winning combination:")
+    print(f"    Precision = {precision_val:.3f}")
+    print(f"    Recall = {recall_val:.3f}")
+    print(f"    F1 Score = {f1_val:.3f}")
+
+    return best_model, best_best_params, best_combo_kw
