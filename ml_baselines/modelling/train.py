@@ -3,10 +3,12 @@ import itertools
 import numpy as np
 import pandas as pd
 
-from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.neural_network import MLPClassifier
+
 from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.preprocessing import StandardScaler
 
 from ml_baselines.data import read_intem
 from ml_baselines.config import Config
@@ -231,6 +233,56 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     return weights
 
 
+def normalise_inputs(X_train, X_val, X_test):
+    """ Normalise training/validation/testing sets based on input data groups.
+
+    Args:
+        X_train (pd.DataFrame): The feature matrix used for training.
+        X_val (pd.DataFrame): The feature matrix used for validation.
+        X_test (pd.DataFrame): The feature matrix used for testing.
+    Returns:
+        X_train_normalised (pd.DataFrame): The normalised feature matrix used for training.
+        X_val_normalised (pd.DataFrame): The normalised feature matrix used for validation.
+        X_test_normalised (pd.DataFrame): The normalised feature matrix used for testing.
+
+    """
+
+    column_groups = {
+            'u10': [col for col in X_train.columns if col.startswith('u10_')],
+            'v10': [col for col in X_train.columns if col.startswith('v10_')],
+            'u850': [col for col in X_train.columns if col.startswith('u850_')],
+            'v850': [col for col in X_train.columns if col.startswith('v850_')],
+            'u500': [col for col in X_train.columns if col.startswith('u500_')],
+            'v500': [col for col in X_train.columns if col.startswith('v500_')],
+            'sp': [col for col in X_train.columns if col.startswith('sp_')],
+            'blh': [col for col in X_train.columns if col.startswith('blh_')],
+            'hour_of_day': ['hour_of_day'],
+            'day_of_year': ['day_of_year'],
+        }
+
+    train_normalised, val_normalised, test_normalised = {}, {}, {}
+    for group, columns in column_groups.items():
+        scaler = StandardScaler() # Use same scaler on all three sets
+
+        train_data = X_train[columns] if len(columns) > 1 else X_train[columns].values.reshape(-1, 1)
+        val_data = X_val[columns] if len(columns) > 1 else X_val[columns].values.reshape(-1, 1)
+        test_data = X_test[columns] if len(columns) > 1 else X_test[columns].values.reshape(-1, 1)
+
+        train_normalised[group] = pd.DataFrame(scaler.fit_transform(train_data), columns=columns, index=X_train.index)
+        val_normalised[group] = pd.DataFrame(scaler.transform(val_data), columns=columns, index=X_val.index)
+        test_normalised[group] = pd.DataFrame(scaler.transform(test_data), columns=columns, index=X_test.index)
+
+    X_train_normalised = pd.concat(train_normalised.values(), axis=1)
+    X_val_normalised = pd.concat(val_normalised.values(), axis=1)
+    X_test_normalised = pd.concat(test_normalised.values(), axis=1)
+
+    normalised_sets = [X_train_normalised, X_val_normalised, X_test_normalised]
+    for set_ in normalised_sets:
+        assert len(set_.columns) == sum(len(cols) for cols in column_groups.values()), "Some columns are missing from normalisation groups."
+
+    return X_train_normalised, X_val_normalised, X_test_normalised
+
+
 def train_baseline_model(site, model_type="mlp",
             balance=0.5,
             balance_method="random",
@@ -253,8 +305,8 @@ def train_baseline_model(site, model_type="mlp",
         verbose (bool): Whether to print verbose output.
     Returns:
         model: The trained model.
-        X (ndarray): The feature matrix used for training.
-        y (ndarray): The target labels used for training.
+        X_train (pd.DataFrame): The feature matrix used for training.
+        y_train (pd.DataFrame): The target labels used for training.
 
         If ``return_scores`` is True, a fourth element is returned:
         scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
@@ -262,21 +314,22 @@ def train_baseline_model(site, model_type="mlp",
 
     # Get the training data
     if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
+    X_train, y_train = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
     if sample_weights is not None:
-        if verbose: print("Calculating sample weights...")
-        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
+        if verbose: print("... calculating sample weights")
+        weights = generate_sample_weights(y_train, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
 
     if verbose:
-        print(f"Number of training points: {len(y)}")
-        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+        print(f"Number of training points: {len(y_train)}")
+        print(f"... number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
 
     # If non-specified, use default hyperparameters
     if model_params is None:
         model_params = {}
 
+    # Create model object
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
         raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
@@ -287,41 +340,43 @@ def train_baseline_model(site, model_type="mlp",
     elif model_type == "gradient_boosting":
         model = GradientBoostingClassifier(**model_params, random_state=42)
     
-    # Fit the model
-    if verbose: print("... fitting")
-    if sample_weights is not None:
-        model.fit(X, y, sample_weight=weights)
-    else:
-        model.fit(X, y)
-
-    # Validation
+    # Get the validation and testing data
     X_val, y_val = get_train_test_data(site, "validation",
                                        time_shift_hours=time_shift_hours, verbose=verbose)
-
-    # Testing
     #TODO: Testing on unbalanced data?
     X_test, y_test = get_train_test_data(site, "test",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
-                                         
 
-    if verbose:
-        print("... predicting")
+    # If MLP, normalise inputs
+    if model_type == "mlp":
+        if verbose: print("... normalising inputs")
+        X_train, X_val, X_test = normalise_inputs(X_train, X_val, X_test)
+
+    # Fit the model
+    if verbose: print("... fitting")
+    if sample_weights is not None:
+        model.fit(X_train, y_train, sample_weight=weights)
+    else:
+        model.fit(X_train, y_train)
+
+    # Make predictions
+    if verbose: print("... predicting")
     if prediction_threshold != 0.5:
         if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
     y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
-    y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_train = (model.predict_proba(X_train)[:, 1] >= prediction_threshold).astype(int)
     y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
 
-    # calculating scores
+    # Calculate scores
     precision_val = precision_score(y_val, y_pred_val)
-    precision_train = precision_score(y, y_pred_train)
+    precision_train = precision_score(y_train, y_pred_train)
     precision_test = precision_score(y_test, y_pred_test)
     recall_val = recall_score(y_val, y_pred_val)
-    recall_train = recall_score(y, y_pred_train)
+    recall_train = recall_score(y_train, y_pred_train)
     recall_test = recall_score(y_test, y_pred_test)
 
     f1_val = f1_score(y_val, y_pred_val)
-    f1_train = f1_score(y, y_pred_train)
+    f1_train = f1_score(y_train, y_pred_train)
     f1_test = f1_score(y_test, y_pred_test)
 
     if verbose:
@@ -347,9 +402,9 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
-        return model, X, y, scores
+        return model, X_train, y_train, scores
     else:
-        return model, X, y
+        return model, X_train, y_train
 
 
 def train_baseline_model_grid_search(site,
