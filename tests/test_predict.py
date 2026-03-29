@@ -36,8 +36,6 @@ def test_predict_baselines_threshold(monkeypatch):
         return_proba=True
     )
 
-    print("test¬!!!")
-    print("y_proba:", y_proba   )
     assert y_pred.tolist() == [1, 1, 1, 1]
     assert y_pred.index.equals(y_true.index)
     assert set(metrics.keys()) == {"precision", "recall", "f1"}
