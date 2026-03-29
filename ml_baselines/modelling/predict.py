@@ -60,7 +60,7 @@ def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.
 
 def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     """
-    Align predictions with observed data, using the indeces of both timeseries.
+    Align predictions with observed data, using the indices of both timeseries.
 
     Parameters:
     - y: The true labels (observed baselines) as a pandas Series with a datetime index.
@@ -113,7 +113,6 @@ def calculate_monthly_means(labelled_df, add_stats=True):
         monthly_means["MAE"] = np.abs(monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"])
         monthly_means["MAPE"] = monthly_means["MAE"] / monthly_means["true_monthly_mf"]
         monthly_means["bias"] = monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"]
-        monthly_means["RMSE"] = np.sqrt((monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"]) ** 2)
 
 
     return monthly_means
@@ -181,9 +180,9 @@ class BaselineLabelledObservations:
 
     def find_monthly_anomalies(self):
         if not hasattr(self, "monthly_means"):
-            self.calculate_monthly_means(self.labelled_df)
+            self.calculate_monthly_means()
 
-        missing_months = self.monthly_means[(self.monthly_means["pred_monthly_count"] == 0) & (self.monthly_means["true_monthly_count"] > 0)].index
+        missing_months = self.monthly_means[((self.monthly_means["pred_monthly_count"].isna()) | (self.monthly_means["pred_monthly_count"] == 0)) & (self.monthly_means["true_monthly_count"] > 0)].index
             
         # find months where the predicted monthly mean is 1,3 and 5 standard deviations away from the true monthly mean
 
@@ -218,7 +217,7 @@ class BaselineLabelledObservations:
             mae = np.mean(period_df["MAE"])
             mape = np.mean(np.abs(period_df["MAPE"]))
             bias = np.mean(period_df["bias"])
-            rmse = np.sqrt(np.mean((period_df["RMSE"]) ** 2))
+            rmse = np.sqrt(np.mean((period_df["MAE"] ** 2)))
 
             print(f"{period[:6]} set - MAE: {mae:.3f}, MAPE: {100*mape:.3f}%, bias: {bias:.3f}, RMSE: {rmse:.3f}")
 
