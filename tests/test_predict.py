@@ -39,7 +39,7 @@ def test_predict_baselines_threshold(monkeypatch):
     assert y_pred.tolist() == [1, 1, 1, 1]
     assert y_pred.index.equals(y_true.index)
     assert set(metrics.keys()) == {"precision", "recall", "f1"}
-    ## assert that recall and precision are 0.5
+    ## assert that precision is 0.5 and recall is 1.0
     assert np.isclose(metrics["precision"], 0.5)
     assert np.isclose(metrics["recall"], 1)
     assert np.allclose(y_proba, 1.0)
