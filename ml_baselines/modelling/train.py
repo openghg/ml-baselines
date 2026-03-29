@@ -62,7 +62,7 @@ def get_train_test_data(site, test_train,
         start_year = cfg.training_period[site][0]
         end_year = cfg.testing_period[site][1]
     else:
-        raise ValueError("test_train must be either 'train', 'test''validation', or 'full' (for a custom period from config, or for all datasets stacked)")
+        raise ValueError("test_train must be either 'train', 'test', 'validation', or 'full' (for a custom period from config, or for all datasets stacked)")
     
     if verbose: print(f"Loading data for site: {site}, period: {start_year}-{end_year}")
 
