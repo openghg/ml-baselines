@@ -395,6 +395,8 @@ def train_baseline_model(site, model_type="mlp",
         print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
 
     ## need to add default model_params! 
+    if model_params is None:
+        model_params = {}
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
         raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")

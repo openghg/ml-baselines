@@ -22,7 +22,7 @@ def plot_confusion_matrix(y, y_pred, normalise=False, title="", labels = ["non-b
     else:
         normalise = None
         
-    cm = confusion_matrix(y, y_pred, labels=np.unique(y), normalize=normalise)
+    cm = confusion_matrix(y, y_pred, labels=[0,1], normalize=normalise)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm,
                                 display_labels=["non-baseline", "baseline"])
     # change ax labels to "Predicted label" and "Intem label "
@@ -140,6 +140,8 @@ def plot_model_confidence(labelled_df, title="", cmap=None, shade_train_and_val_
         )
     elif isinstance(cmap, str):
         baseline_cmap = plt.get_cmap(cmap)
+    else:
+        baseline_cmap = cmap
 
     plot_df = labelled_df.sort_values("predicted_proba")
 
@@ -238,7 +240,7 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
     deviation = monthly_means["true_monthly_mf"].iloc[0] * 0.05
 
 
-    if show_anomalies and hasattr(monthly_means, "is_anomaly"):
+    if show_anomalies and 'is_anomaly' in monthly_means.columns:
         for threshold in np.unique(monthly_means["is_anomaly"]):
             if threshold > 0:
                 anomaly_months = monthly_means[monthly_means["is_anomaly"] == threshold]
