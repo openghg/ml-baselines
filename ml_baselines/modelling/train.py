@@ -54,8 +54,17 @@ def get_train_test_data(site, test_train,
     elif test_train == "validation":
         start_year = cfg.validation_period[site][0]
         end_year = cfg.validation_period[site][1]
+        # check if config has full_period attribute
+    elif test_train == "full" and cfg.full_period[site] is not None:
+        start_year = cfg.full_period[site][0]
+        end_year = cfg.full_period[site][1]
+    elif test_train == "full":
+        start_year = cfg.training_period[site][0]
+        end_year = cfg.testing_period[site][1]
     else:
-        raise ValueError("test_train must be either 'train', 'test', or 'validation'")
+        raise ValueError("test_train must be either 'train', 'test''validation', or 'full' (for a custom period from config, or for all datasets stacked)")
+    
+    if verbose: print(f"Loading data for site: {site}, period: {start_year}-{end_year}")
 
     df_features = open_features(site,
                             start_year = start_year,
