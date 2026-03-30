@@ -405,7 +405,8 @@ def train_baseline_model_grid_search(site,
                           scoring="f1",
                           param_grid=None,
                           data_kwargs=None,
-                          validation_keys=None):
+                          validation_keys=None,
+                          return_cv_scores=False):
     """ Train a model to classify baseline events using grid search for hyperparameter tuning.
 
     The grid search explores both the model hyperparameters in ``param_grid`` and
@@ -438,10 +439,15 @@ def train_baseline_model_grid_search(site,
             ``"time_shift_hours"``) should be included here; training-only
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
+        return_cv_scores (bool, optional): Whether to return the grid search results as a dictionary.
 
     Returns:
         tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
             model, the winning hyperparameter dict, and the winning data-kwargs dict.
+
+        If ``return_cv_scores`` is True, a fourth element is returned:
+        cv_results (dict): A dictionary of grid search results for each data kwargs
+            combination tested, containing scores for all hyperparameter combinations.
     """
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
@@ -471,6 +477,7 @@ def train_baseline_model_grid_search(site,
     best_params_list = []
     best_scores_list = []
     best_data_kwargs_list = []
+    all_grid_searches = []
 
     for combo in combos:
         combo_kw = dict(zip(keys, combo))
@@ -508,6 +515,7 @@ def train_baseline_model_grid_search(site,
         best_params_list.append(grid_search.best_params_)
         best_scores_list.append(grid_search.best_score_)
         best_data_kwargs_list.append(combo_kw)
+        all_grid_searches.append(grid_search)
 
     # Find the best combination across all data-kwarg combos
     best_index = best_scores_list.index(max(best_scores_list))
@@ -537,4 +545,9 @@ def train_baseline_model_grid_search(site,
     print(f"    Recall = {recall_val:.3f}")
     print(f"    F1 Score = {f1_val:.3f}")
 
-    return best_model, best_best_params, best_combo_kw
+    if return_cv_scores:
+        # Build dictionary of cv results for all data kwarg combinations
+        all_cv_results = {str(data_kw): gs.cv_results_ for data_kw, gs in zip(best_data_kwargs_list, all_grid_searches)}
+        return best_model, best_best_params, best_combo_kw, all_cv_results
+    else:
+        return best_model, best_best_params, best_combo_kw
