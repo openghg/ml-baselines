@@ -508,6 +508,7 @@ def train_baseline_model_grid_search(site,
             refit=refit,
             verbose=2,
             n_jobs=-1
+            return_train_score=return_cv_scores,
         )
 
         print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
