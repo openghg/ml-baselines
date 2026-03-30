@@ -355,7 +355,7 @@ def train_baseline_model(site, model_type="mlp",
             undersample=0,
             sample_weights=None,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, verbose=True):
+            model_params=None, return_scores=False, verbose=True, normalise_inputs=False):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -413,10 +413,14 @@ def train_baseline_model(site, model_type="mlp",
     X_test, y_test = get_train_test_data(site, "test",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
 
-    # If MLP, normalise inputs
-    if model_type == "mlp":
+    if normalise_inputs:
         if verbose: print("... normalising inputs")
-        X_train, X_val, X_test = normalise_inputs(X_train, X_val, X_test)
+        scaler = InputPerVariableScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_val = scaler.transform(X_val)
+        X_test = scaler.transform(X_test)
+    else:
+        scaler = None
 
     # Fit the model
     if verbose: print("... fitting")
@@ -468,9 +472,9 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
-        return model, X_train, y_train, scores
+        return model, X_train, y_train, scores, scaler
     else:
-        return model, X_train, y_train
+        return model, X_train, y_train, scaler
 
 
 def train_baseline_model_grid_search(site,
