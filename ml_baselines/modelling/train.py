@@ -232,6 +232,72 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     
     return weights
 
+class InputPerVariableScaler:
+    def __init__(self, aux_variables=["hour_of_day", "day_of_year"]):
+        """
+        Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler. This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale. The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
+        """
+
+        self.scalers = {}
+        self.aux_variables = aux_variables
+    
+    def fit(self, X, feature_names=None):
+        if isinstance(X, np.ndarray) and feature_names is None:
+            raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
+        elif isinstance(X, np.ndarray) and feature_names is not None:
+            X = pd.DataFrame(X, columns=feature_names)
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("Input X must be a pandas DataFrame with relevant column names.")
+        
+        col_names = np.unique([col.split("_")[0] if col not in self.aux_variables else col for col in X.columns])
+        col_names = sorted(col_names, key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else float('inf'))
+        col_names = [col for col in col_names if col not in self.aux_variables] + [col for col in self.aux_variables if col in col_names]
+        self.col_names = col_names
+
+        column_groups = { }
+        for col in col_names:
+            if col in self.aux_variables:
+                column_groups[col] = [col]
+            else:
+                column_groups[col] = [c for c in X.columns if c.startswith(col + "_")]
+
+        for group, columns in column_groups.items():
+            scaler = StandardScaler() # Use same scaler on all three sets
+
+            train_data = X[columns] if len(columns) > 1 else X[columns].values.reshape(-1, 1)
+            scaler.fit(train_data)
+            self.scalers[group] = scaler
+        
+
+    def transform(self, X, feature_names=None):
+        if isinstance(X, np.ndarray) and feature_names is None:
+            raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
+        elif isinstance(X, np.ndarray) and feature_names is not None:
+            X = pd.DataFrame(X, columns=feature_names)
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("Input X must be a pandas DataFrame with relevant column names.")
+        
+        # check that the model has been fitted
+        if self.scalers == {}:
+            raise ValueError("The scaler has not been fitted yet. Please call fit() before transform().")
+
+        transformed_groups = []
+        for group in self.col_names:
+            columns = [col for col in X.columns if col.startswith(group + "_")] if group not in self.aux_variables else [group]
+            scaler = self.scalers[group]
+
+            data = X[columns] if len(columns) > 1 else X[columns].values.reshape(-1, 1)
+            transformed_data = pd.DataFrame(scaler.transform(data), columns=columns, index=X.index)
+            transformed_groups.append(transformed_data)
+
+        X_transformed = pd.concat(transformed_groups, axis=1)
+        return X_transformed
+    
+    def fit_transform(self, X, feature_names=None):
+        self.fit(X, feature_names=feature_names)
+        return self.transform(X, feature_names=feature_names)
+
+    
 
 def normalise_inputs(X_train, X_val, X_test):
     """ Normalise training/validation/testing sets based on input data groups.
