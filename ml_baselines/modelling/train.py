@@ -352,6 +352,54 @@ def train_baseline_model(site, model_type="mlp",
         return model, X, y
 
 
+def get_default_params_grid(model_type):
+    """ Retrieve a default dictionary of hyperparameters to tune in a grid search for a given model.
+
+    Args:
+        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting".
+
+    Returns:
+        param_grid (dict): A dictionary containing model hyperparameters to tune.
+    """
+
+    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
+    if model_type not in valid_model_types:
+            raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
+
+    if model_type == "mlp":
+        param_grid = {
+            'hidden_layer_sizes': [(100,), (50,),],
+            'activation': ['relu', 'logisitic',],
+            'solver': ['adam',],
+            'alpha': [0.0001,],
+            'batch_size': [5, 10, 'auto',],
+            'max_iter': [1000, 500,],
+            'early_stopping': [True,],
+            'shuffle': [False, True,]
+        }
+    elif model_type == "random_forest":
+        param_grid = {
+            'n_estimators': [100, 50, 200,],
+            'criterion': ['gini', 'entropy',],
+            'max_depth': [None, 5, 10,],
+            'min_samples_split': [2, 5, 10,],
+            'max_features': ['log2', 'sqrt', None],
+            'bootstrap': [True, False],
+        }
+    elif model_type == "gradient_boosting":
+        param_grid = {
+            'loss': ['log_loss', 'exponential'],
+            'learning_rate': [0.1, 0.2, 0.5,],
+            'n_estimators': [100, 50, 200],
+            'criterion': ['friedman_mse', 'squared_error'],
+            'min_samples_split': [2, 5, 10,],
+            'max_depth': [3, 5, 8, 10,],
+            'max_features': ['sqrt', 'log2'],
+        }
+
+    return param_grid
+
+
 def train_baseline_model_grid_search(site,
                           model_type="mlp",
                           scoring="f1",
@@ -407,36 +455,7 @@ def train_baseline_model_grid_search(site,
         model = GradientBoostingClassifier(random_state=42)
 
     if param_grid is None:
-        if model_type == "mlp":
-            param_grid = {
-                'hidden_layer_sizes': [(50,),],
-                'activation': ['relu'],
-                'solver': ['adam'],
-                'alpha': [0.0001],
-                'batch_size': [5, 10],
-                'max_iter': [1000],
-                'early_stopping': [True],
-                'shuffle': [False]
-            }
-        if model_type == "random_forest":
-            param_grid = {
-                'n_estimators': [100, 50, 200,],
-                'criterion': ['gini', 'entropy',],
-                'max_depth': [None, 5, 10,],
-                'min_samples_split': [2, 5, 10,],
-                'max_features': ['log2', 'sqrt', None],
-                'bootstrap': [True, False],
-            }
-        if model_type == "gradient_boosting":
-            param_grid = {
-                'loss': ['log_loss', 'exponential'],
-                'learning_rate': [0.1, 0.2, 0.5,],
-                'n_estimators': [100, 50, 200],
-                'criterion': ['friedman_mse', 'squared_error'],
-                'min_samples_split': [2, 5, 10,],
-                'max_depth': [3, 5, 8, 10,],
-                'max_features': ['sqrt', 'log2'],  
-            }
+        param_grid = get_default_params_grid(model_type)
 
     if data_kwargs is None:
         data_kwargs = {"balance": [-1],
