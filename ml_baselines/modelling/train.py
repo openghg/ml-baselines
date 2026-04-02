@@ -232,10 +232,13 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     
     return weights
 
+
 class InputPerVariableScaler:
     def __init__(self, aux_variables=["hour_of_day", "day_of_year"]):
         """
-        Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler. This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale. The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
+        Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler.
+        This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale.
+        The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
         """
 
         self.scalers = {}
@@ -297,65 +300,15 @@ class InputPerVariableScaler:
         self.fit(X, feature_names=feature_names)
         return self.transform(X, feature_names=feature_names)
 
-    
-
-def normalise_inputs(X_train, X_val, X_test):
-    """ Normalise training/validation/testing sets based on input data groups.
-
-    Args:
-        X_train (pd.DataFrame): The feature matrix used for training.
-        X_val (pd.DataFrame): The feature matrix used for validation.
-        X_test (pd.DataFrame): The feature matrix used for testing.
-    Returns:
-        X_train_normalised (pd.DataFrame): The normalised feature matrix used for training.
-        X_val_normalised (pd.DataFrame): The normalised feature matrix used for validation.
-        X_test_normalised (pd.DataFrame): The normalised feature matrix used for testing.
-
-    """
-
-    column_groups = {
-            'u10': [col for col in X_train.columns if col.startswith('u10_')],
-            'v10': [col for col in X_train.columns if col.startswith('v10_')],
-            'u850': [col for col in X_train.columns if col.startswith('u850_')],
-            'v850': [col for col in X_train.columns if col.startswith('v850_')],
-            'u500': [col for col in X_train.columns if col.startswith('u500_')],
-            'v500': [col for col in X_train.columns if col.startswith('v500_')],
-            'sp': [col for col in X_train.columns if col.startswith('sp_')],
-            'blh': [col for col in X_train.columns if col.startswith('blh_')],
-            'hour_of_day': ['hour_of_day'],
-            'day_of_year': ['day_of_year'],
-        }
-
-    train_normalised, val_normalised, test_normalised = {}, {}, {}
-    for group, columns in column_groups.items():
-        scaler = StandardScaler() # Use same scaler on all three sets
-
-        train_data = X_train[columns] if len(columns) > 1 else X_train[columns].values.reshape(-1, 1)
-        val_data = X_val[columns] if len(columns) > 1 else X_val[columns].values.reshape(-1, 1)
-        test_data = X_test[columns] if len(columns) > 1 else X_test[columns].values.reshape(-1, 1)
-
-        train_normalised[group] = pd.DataFrame(scaler.fit_transform(train_data), columns=columns, index=X_train.index)
-        val_normalised[group] = pd.DataFrame(scaler.transform(val_data), columns=columns, index=X_val.index)
-        test_normalised[group] = pd.DataFrame(scaler.transform(test_data), columns=columns, index=X_test.index)
-
-    X_train_normalised = pd.concat(train_normalised.values(), axis=1)
-    X_val_normalised = pd.concat(val_normalised.values(), axis=1)
-    X_test_normalised = pd.concat(test_normalised.values(), axis=1)
-
-    normalised_sets = [X_train_normalised, X_val_normalised, X_test_normalised]
-    for set_ in normalised_sets:
-        assert len(set_.columns) == sum(len(cols) for cols in column_groups.values()), "Some columns are missing from normalisation groups."
-
-    return X_train_normalised, X_val_normalised, X_test_normalised
-
 
 def train_baseline_model(site, model_type="mlp",
             balance=0.5,
             balance_method="random",
             undersample=0,
             sample_weights=None,
+            normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, verbose=True, normalise_inputs=False):
+            model_params=None, return_scores=False, verbose=True):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -365,6 +318,7 @@ def train_baseline_model(site, model_type="mlp",
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
         undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
         sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
+        normalise_inputs (bool): Whether to normalise the input features based on category using InputPerVariableScaler.
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
@@ -373,6 +327,7 @@ def train_baseline_model(site, model_type="mlp",
         model: The trained model.
         X_train (pd.DataFrame): The feature matrix used for training.
         y_train (pd.DataFrame): The target labels used for training.
+        scaler (InputPerVariableScaler or None): If  ``normalise_inputs`` is true, returns fitted scaler used to normalise input features to be applied to new data. Otherwise, returns None.
 
         If ``return_scores`` is True, a fourth element is returned:
         scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
