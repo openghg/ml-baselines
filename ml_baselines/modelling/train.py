@@ -417,7 +417,7 @@ def train_baseline_model_grid_search(site,
         model_type (str): The type of model to train. Currently accepts "mlp", 
             "random_forest", or "gradient_boosting". Note that the param_grid
             needs to be appropriate for the chosen model type. 
-        scoring (str): The metric being optimised for.
+        scoring (str or list): Metrics to evaluate during grid search. Can be a single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]). If a list is provided, the first metric will be used for selecting the best model (refit), and scores for all metrics will be returned in cv_results if return_cv_scores is True.
         param_grid (dict, optional): A dictionary containing model
             hyperparameters to tune. If None, default values are used.
         data_kwargs (dict, optional): A dictionary where each key is a keyword
@@ -439,15 +439,14 @@ def train_baseline_model_grid_search(site,
             ``"time_shift_hours"``) should be included here; training-only
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
-        return_cv_scores (bool, optional): Whether to return the grid search results as a dictionary.
+        return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
 
     Returns:
         tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
             model, the winning hyperparameter dict, and the winning data-kwargs dict.
 
         If ``return_cv_scores`` is True, a fourth element is returned:
-        cv_results (dict): A dictionary of grid search results for each data kwargs
-            combination tested, containing scores for all hyperparameter combinations.
+        cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
@@ -477,7 +476,12 @@ def train_baseline_model_grid_search(site,
     best_params_list = []
     best_scores_list = []
     best_data_kwargs_list = []
-    all_grid_searches = []
+    cv_results = {} 
+    
+    if type(scoring) == list:
+        refit = scoring[0]
+    else:
+        refit = True
 
     for combo in combos:
         combo_kw = dict(zip(keys, combo))
@@ -501,10 +505,11 @@ def train_baseline_model_grid_search(site,
             param_grid,
             scoring=scoring,
             cv=ps,
-            refit=False,
+            refit=refit,
             verbose=2,
-            n_jobs=-1
-        )
+            n_jobs=-1,
+            return_train_score=return_cv_scores,
+            )
 
         print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
         grid_search.fit(X_all, y_all)
@@ -515,7 +520,8 @@ def train_baseline_model_grid_search(site,
         best_params_list.append(grid_search.best_params_)
         best_scores_list.append(grid_search.best_score_)
         best_data_kwargs_list.append(combo_kw)
-        all_grid_searches.append(grid_search)
+        if return_cv_scores:
+            cv_results[str(combo_kw)] = pd.DataFrame(grid_search.cv_results_)
 
     # Find the best combination across all data-kwarg combos
     best_index = best_scores_list.index(max(best_scores_list))
@@ -545,9 +551,16 @@ def train_baseline_model_grid_search(site,
     print(f"    Recall = {recall_val:.3f}")
     print(f"    F1 Score = {f1_val:.3f}")
 
+
+    # Build dictionary of cv results for all data kwarg combinations
     if return_cv_scores:
-        # Build dictionary of cv results for all data kwarg combinations
-        all_cv_results = {str(data_kw): gs.cv_results_ for data_kw, gs in zip(best_data_kwargs_list, all_grid_searches)}
+        # Combine all cv results into a single DataFrame, adding columns for the data kwargs
+        for data_kw, df in cv_results.items():
+            df["data_kwarg"] = data_kw
+            for key, value in eval(data_kw).items():
+                df[key] = str(value)
+        all_cv_results = pd.concat(cv_results.values(), ignore_index=True)
+
         return best_model, best_best_params, best_combo_kw, all_cv_results
     else:
         return best_model, best_best_params, best_combo_kw
