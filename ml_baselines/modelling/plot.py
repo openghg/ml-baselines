@@ -16,6 +16,15 @@ cfg = Config()
 models_path = cfg.models_path
 
 def plot_confusion_matrix(y, y_pred, normalise=False, title="", labels = ["non-baseline", "baseline"]):
+    """
+    Plot a confusion matrix for the true labels y and predicted labels y_pred using sklearn's display.
+    Inputs:
+    - y: True labels
+    - y_pred: Predicted labels
+    - normalise: If True, the confusion matrix will be normalised to show proportions of the total dataset instead of counts.
+    - title: The title of the plot.
+    - labels: The labels for the axes.
+    """
 
     if normalise:
         normalise = "all"
