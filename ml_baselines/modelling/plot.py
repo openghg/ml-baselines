@@ -17,13 +17,15 @@ models_path = cfg.models_path
 
 def plot_confusion_matrix(y, y_pred, normalise=False, title="", labels = ["non-baseline", "baseline"]):
     """
-    Plot a confusion matrix for the true labels y and predicted labels y_pred using sklearn's display.
-    Inputs:
-    - y: True labels
-    - y_pred: Predicted labels
-    - normalise: If True, the confusion matrix will be normalised to show proportions of the total dataset instead of counts.
-    - title: The title of the plot.
-    - labels: The labels for the axes.
+    Plot a confusion matrix for the true labels and predicted labels.
+
+    Args:
+        y: True labels.
+        y_pred: Predicted labels.
+        normalise: If True, the confusion matrix will be normalised to show
+            proportions of the total dataset instead of counts.
+        title: The title of the plot.
+        labels: The labels for the axes.
     """
 
     if normalise:
@@ -45,13 +47,18 @@ def plot_confusion_matrix(y, y_pred, normalise=False, title="", labels = ["non-b
 
 def plot_obs_with_labels(labelled_df, shade_train_and_val_periods=True, title="", site=None, plot_true_negatives=True):
     """
-    Plot observed molefractions and predicted baseline labels over time, using confusion matrix labels (true positive, false positive etc)
+    Plot observed molefractions and predicted baseline labels over time.
 
-    Parameters:
-    - labelled_df: A DataFrame containing the observed molefractions in a column named "mf", true baseline labels in a column named "baseline", and predicted baseline labels in a column named "predicted_baseline". The DataFrame should have a datetime index.
-
-    Returns:
-    - A plot showing the observed molefractions and highlighting false positives, false negatives, and true positives.
+    Args:
+        labelled_df: A DataFrame containing the observed molefractions in a
+            column named "mf", true baseline labels in a column named
+            "baseline", and predicted baseline labels in a column named
+            "predicted_baseline". The DataFrame should have a datetime index.
+        shade_train_and_val_periods: Whether to shade the training and
+            validation periods.
+        title: The title of the plot.
+        site: The site name used to shade training and validation periods.
+        plot_true_negatives: Whether to plot true negatives.
     """
 
     true_positives_mask = (labelled_df.baseline == 1) & (labelled_df.predicted_baseline == 1)
@@ -95,13 +102,13 @@ def plot_obs(labelled_df, labels_from="InTEM", title=""):
     """
     Plot observed molefractions.
 
-    Parameters:
-    - labelled_df: A DataFrame containing the observed molefractions in a column named "mf", true baseline labels in a column named "baseline", and predicted baseline labels in a column named "predicted_baseline". The DataFrame should have a datetime index.
-    - labels_from: The source of the labels to plot (e.g., "InTEM").
-    - site: The site for which to plot observed molefractions.
-
-    Returns:
-    - A plot showing the observed molefractions and highlighting false positives, false negatives, and true positives.
+    Args:
+        labelled_df: A DataFrame containing the observed molefractions in a
+            column named "mf", true baseline labels in a column named
+            "baseline", and predicted baseline labels in a column named
+            "predicted_baseline". The DataFrame should have a datetime index.
+        labels_from: The source of the labels to plot (e.g., "InTEM").
+        title: The title of the plot.
     """
     if labels_from == "InTEM":
         true_mask = (labelled_df.baseline == 1)
@@ -189,14 +196,21 @@ def plot_model_confidence(labelled_df, title="", cmap=None, shade_train_and_val_
 
 def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=None, obs_df=None, plot_count_hist=False, show_anomalies=False, title="Monthly Mean Molefractions for Predicted and True Baselines"):
     """
-    plot monthly means of the observed molefractions, and one standard deviation. Generate the dataset for this plot using the calculate_monthly_means function.
+    Plot monthly means of the observed molefractions and one standard deviation.
 
-    Parameters:
-    - monthly_means: A DataFrame containing the monthly mean molefractions with a timeindex
-    - shade_train_and_val_periods: Whether to shade the training and validation periods on the plot (requires parameter site to be provided)
-    - site: The site for which to plot observed molefractions. Required if shade_train_and_val_periods is True.
-    - obs_df: Optional. If passed (a DataFrame containing the observed molefractions in a column named "mf" with a datetime index), plots the observed molefractions as a gray line in the background of the plot.
-    - plot_count_hist: Optional. If True, plots a histogram of the monthly baseline counts on a twin axis.
+    Args:
+        monthly_means: A DataFrame containing the monthly mean molefractions
+            with a time index.
+        shade_train_and_val_periods: Whether to shade the training and
+            validation periods on the plot.
+        site: The site for which to plot observed molefractions. Required if
+            shade_train_and_val_periods is True.
+        obs_df: If passed, plots the observed molefractions as a gray line in
+            the background of the plot.
+        plot_count_hist: If True, plots a histogram of the monthly baseline
+            counts on a twin axis.
+        show_anomalies: Whether to highlight anomaly months.
+        title: The title of the plot.
     """
     fig, ax = plt.subplots(figsize=(12,6))
 
@@ -263,7 +277,12 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
 
 def plot_baseline_count_hist(monthly_means, ax=None):
     """
-    Plot a histogram of the monthly baseline counts for true and predicted baselines, using the DataFrame generated by the calculate_monthly_means function.
+    Plot a histogram of the monthly baseline counts for true and predicted baselines.
+
+    Args:
+        monthly_means: A DataFrame generated by the calculate_monthly_means
+            function.
+        ax: Optional matplotlib axis to draw on.
     """
     import datetime
     if ax is None:

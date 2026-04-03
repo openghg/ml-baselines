@@ -13,21 +13,25 @@ cfg = Config()
 def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", verbose=True, save_preds = False, return_proba=False):
     """
     Predict baseline events for a given site using a trained model.
-    
-    Parameters:
-    - site: The site for which to make predictions.
-    - model: The trained model to use for predictions.
-    - time_shift_hours: List of time shifts (in hours) to apply to the data for prediction.
-    - prediction_threshold: Threshold for converting predicted probabilities to binary predictions.
-    - prediction_mode: Whether to predict on the "validation" or "test" set.
-    - verbose: Whether to print detailed information about the prediction process.
-    - save_preds: Whether to save the predictions to disk (not yet implemented).
-    - return_proba: Whether to return predicted probabilities as well as binary predictions.
-    
+
+    Args:
+        site: The site for which to make predictions.
+        model: The trained model to use for predictions.
+        time_shift_hours: List of time shifts (in hours) to apply to the data
+            for prediction.
+        prediction_threshold: Threshold for converting predicted probabilities
+            to binary predictions.
+        prediction_mode: Whether to predict on the "validation" or "test" set.
+        verbose: Whether to print detailed information about the prediction
+            process.
+        save_preds: Whether to save the predictions to disk (not yet implemented).
+        return_proba: Whether to return predicted probabilities as well as
+            binary predictions.
+
     Returns:
-    - y: The true labels for the prediction set.
-    - y_pred: The predicted labels for the prediction set.
-    - metrics: A dictionary containing precision, recall, and F1 score.
+        tuple: The true labels, predicted labels, and metrics dictionary. If
+            ``return_proba`` is True, predicted probabilities are included as
+            well.
     """
 
     if verbose: print(f"Predicting on {prediction_mode} set for site: {site} with prediction threshold: {prediction_threshold}")
@@ -60,15 +64,21 @@ def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.
 
 def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     """
-    Align predictions with observed data, using the indices of both timeseries.
+    Align predictions with observed data using the indices of both time series.
 
-    Parameters:
-    - y: The true labels (observed baselines) as a pandas Series with a datetime index.
-    - y_pred: The predicted labels (predicted baselines) pandas Series with a datetime index.
-    - df_obs: A DataFrame containing the observed molefractions in a column named "mf" with a datetime index. Use read_agage to read in the observed data.
+    Args:
+        y: The true labels (observed baselines) as a pandas Series with a
+            datetime index.
+        y_pred: The predicted labels (predicted baselines) as a pandas Series
+            with a datetime index.
+        df_obs: A DataFrame containing the observed molefractions in a column
+            named "mf" with a datetime index.
+        y_proba: Optional predicted probabilities aligned with ``y_pred``.
 
     Returns:
-    - labelled_df: A DataFrame containing the observed molefractions, true baseline labels, and predicted baseline labels, all aligned by their datetime index.
+        pd.DataFrame: A DataFrame containing the observed molefractions, true
+            baseline labels, and predicted baseline labels, all aligned by
+            their datetime index.
     """
 
     y = y[(y.index.year >= min(df_obs.index.year)) & (y.index.year <= max(df_obs.index.year))]
@@ -86,13 +96,18 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
 
 def calculate_monthly_means(labelled_df, add_stats=True):
     """
-    Calculate monthly means of the observed molefractions, and the percentage of baseline labels in each month.
+    Calculate monthly means of the observed molefractions.
 
-    Parameters:
-    - labelled_df: A DataFrame containing the observed molefractions in a column named "mf", true baseline labels in a column named "baseline", and predicted baseline labels in a column named "predicted_baseline". The DataFrame should have a datetime index.
+    Args:
+        labelled_df: A DataFrame containing the observed molefractions in a
+            column named "mf", true baseline labels in a column named
+            "baseline", and predicted baseline labels in a column named
+            "predicted_baseline". The DataFrame should have a datetime index.
+        add_stats: Whether to add MAE, MAPE, bias, and coefficient of variation.
 
     Returns:
-    - monthly_means: A DataFrame containing the monthly mean molefractions and the percentage of baseline labels for each month.
+        pd.DataFrame: A DataFrame containing the monthly mean molefractions and
+            related statistics for each month.
     """
     df_pred = labelled_df[labelled_df["predicted_baseline"] == 1]
     df_true = labelled_df[labelled_df["baseline"] == 1]
@@ -122,23 +137,30 @@ def calculate_monthly_means(labelled_df, add_stats=True):
 class BaselineLabelledObservations:
     def __init__(self, y, y_pred, df_obs, site, species, y_proba=None):
         """
-        Object to hold observed molefractions along with true and predicted baseline labels, and provide methods for plotting these observations the labels. Also provides a method to calculate monthly means of the observed molefractions for true and predicted baselines.
+        Object to hold observed molefractions along with true and predicted
+        baseline labels, and provide methods for plotting these observations and
+        the labels. Also provides a method to calculate monthly means of the
+        observed molefractions for true and predicted baselines.
 
-        Parameters:
-        - y: The true labels (observed baselines) as a pandas Series with a datetime index.
-        - y_pred: The predicted labels (predicted baselines) pandas Series with a datetime
-        index.
-        - df_obs: A DataFrame containing the observed molefractions in a column named "mf" with a datetime index. Use read_agage to read in the observed data.
-        - site: the site the obs and baselines refer to
-        - species: the species the obs refer to
+        Args:
+            y: The true labels (observed baselines) as a pandas Series with a
+                datetime index.
+            y_pred: The predicted labels (predicted baselines) as a pandas
+                Series with a datetime index.
+            df_obs: A DataFrame containing the observed molefractions in a
+                column named "mf" with a datetime index.
+            site: The site the observations and baselines refer to.
+            species: The species the observations refer to.
+            y_proba: Optional predicted probabilities aligned with ``y_pred``.
 
         Attributes:
-        - labelled_df: A DataFrame containing the observed molefractions, true baseline labels,
-        and predicted baseline labels, as well as other columns such as predicted probabilities if available, all aligned by their datetime index. The DataFrame is created using the align_predictions_and_obs function.
-        - monthly_means: A DataFrame containing the monthly mean molefractions. The attribute is calculated using the calculate_monthly_means method. contains the mean molefraction, its standard deviation and the number of baseline labels for each month: true_monthly_mf, true_monthly_std, true_monthly_count, pred_monthly_mf, pred_monthly_std, pred_monthly_count.
-        
-
-
+            labelled_df: A DataFrame containing the observed molefractions,
+                true baseline labels, and predicted baseline labels, as well as
+                other columns such as predicted probabilities if available, all
+                aligned by their datetime index.
+            monthly_means: A DataFrame containing the monthly mean
+                molefractions. The attribute is calculated using the
+                calculate_monthly_means method.
         """
         self.site = site
         self.species = species
@@ -154,8 +176,10 @@ class BaselineLabelledObservations:
 
     def get_prediction_scores(self):
         """
-        Calculate precision, recall, and F1 score for the predicted baseline labels compared to the true baseline labels, for each data period (training, validation, testing, and full). The scores are stored in a dictionary attribute called "scores", with keys corresponding to each data period (if available)
-        
+        Calculate precision, recall, and F1 score for each data period.
+
+        The scores are stored in a dictionary attribute called ``scores``, with
+        keys corresponding to each data period if available.
         """
         scores = {}
         for period in self.data_periods:
