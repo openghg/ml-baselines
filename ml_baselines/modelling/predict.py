@@ -21,7 +21,7 @@ def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.
             for prediction.
         prediction_threshold: Threshold for converting predicted probabilities
             to binary predictions.
-        prediction_mode: Whether to predict on the "validation" or "test" set.
+        prediction_mode: Whether to predict on the "validation", "test" or "full" set, where "full" is either the custom period defined in the config or the entire period from the start of training to the end of testing.
         verbose: Whether to print detailed information about the prediction
             process.
         save_preds: Whether to save the predictions to disk (not yet implemented).
@@ -103,7 +103,7 @@ def calculate_monthly_means(labelled_df, add_stats=True):
             column named "mf", true baseline labels in a column named
             "baseline", and predicted baseline labels in a column named
             "predicted_baseline". The DataFrame should have a datetime index.
-        add_stats: Whether to add MAE, MAPE, bias, and coefficient of variation.
+        add_stats: Whether to add MAE, MAPE, bias, and coefficient of variation for each month as additional columns.
 
     Returns:
         pd.DataFrame: A DataFrame containing the monthly mean molefractions and
