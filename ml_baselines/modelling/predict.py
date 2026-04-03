@@ -107,6 +107,8 @@ def calculate_monthly_means(labelled_df, add_stats=True):
 
     monthly_means = pd.concat([monthly_pred, monthly_true], axis=1)
     monthly_means.index = monthly_means.index.to_period("M").to_timestamp()
+    monthly_means["pred_monthly_count"] = monthly_means["pred_monthly_count"].fillna(0).astype(int)
+    monthly_means["true_monthly_count"] = monthly_means["true_monthly_count"].fillna(0).astype(int)
 
     if add_stats:
         monthly_means["true_coeffvariation"] = monthly_means["true_monthly_std"] / monthly_means["true_monthly_mf"]

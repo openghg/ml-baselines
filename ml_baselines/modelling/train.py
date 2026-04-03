@@ -432,16 +432,33 @@ def train_baseline_model(site, model_type="mlp",
     y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
 
     # calculating scores
-    precision_val = precision_score(y_val, y_pred_val)
-    precision_train = precision_score(y, y_pred_train)
-    precision_test = precision_score(y_test, y_pred_test)
-    recall_val = recall_score(y_val, y_pred_val)
-    recall_train = recall_score(y, y_pred_train)
-    recall_test = recall_score(y_test, y_pred_test)
+    # run each set of tests only if there are positive examples, otherwise return zero
+    if sum(y_pred_val) == 0:
+        precision_val = 0.0
+        recall_val = 0.0
+        f1_val = 0.0
+    else:
+        precision_val = precision_score(y_val, y_pred_val)
+        recall_val = recall_score(y_val, y_pred_val)
+        f1_val = f1_score(y_val, y_pred_val)
 
-    f1_val = f1_score(y_val, y_pred_val)
-    f1_train = f1_score(y, y_pred_train)
-    f1_test = f1_score(y_test, y_pred_test)
+    if sum(y_pred_train) == 0:
+        precision_train = 0.0
+        recall_train = 0.0
+        f1_train = 0.0
+    else:
+        precision_train = precision_score(y, y_pred_train)
+        recall_train = recall_score(y, y_pred_train)
+        f1_train = f1_score(y, y_pred_train)
+
+    if sum(y_pred_test) == 0:
+        precision_test = 0.0
+        recall_test = 0.0
+        f1_test = 0.0
+    else:
+        precision_test = precision_score(y_test, y_pred_test)
+        recall_test = recall_score(y_test, y_pred_test)
+        f1_test = f1_score(y_test, y_pred_test)
 
     if verbose:
         print(f"Precision on Training Set = {precision_train:.3f}")
