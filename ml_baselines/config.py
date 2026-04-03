@@ -64,6 +64,7 @@ class Config():
         self.training_period = {site_code: site_info[site_code]["training_period"] for site_code in site_info}
         self.validation_period = {site_code: site_info[site_code]["validation_period"] for site_code in site_info}
         self.testing_period = {site_code: site_info[site_code]["testing_period"] for site_code in site_info}
+        self.full_period = {site_code: site_info[site_code]["full_period"] if "full_period" in site_info[site_code] else None for site_code in site_info}
 
         # Met variables to be extracted (and their order)
         with open(root_dir / "data/met_info.json") as f:
