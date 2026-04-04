@@ -55,8 +55,17 @@ def get_train_test_data(site, test_train,
     elif test_train == "validation":
         start_year = cfg.validation_period[site][0]
         end_year = cfg.validation_period[site][1]
+        # check if config has full_period attribute
+    elif test_train == "full" and cfg.full_period[site] is not None:
+        start_year = cfg.full_period[site][0]
+        end_year = cfg.full_period[site][1]
+    elif test_train == "full":
+        start_year = cfg.training_period[site][0]
+        end_year = cfg.testing_period[site][1]
     else:
-        raise ValueError("test_train must be either 'train', 'test', or 'validation'")
+        raise ValueError("test_train must be either 'train', 'test', 'validation', or 'full' (for a custom period from config, or for all datasets stacked)")
+    
+    if verbose: print(f"Loading data for site: {site}, period: {start_year}-{end_year}")
 
     df_features = open_features(site,
                             start_year = start_year,
@@ -433,13 +442,195 @@ def train_baseline_model(site, model_type="mlp",
     
     return model, X_train, y_train, extra_info
 
+def train_baseline_model(site, model_type="mlp",
+            balance=0.5,
+            balance_method="random",
+            undersample=0,
+            sample_weights=None,
+            time_shift_hours=[6], prediction_threshold=0.5,
+            model_params=None, return_scores=False, verbose=True):
+    """ Train a model to classify baseline events for a given site.
+
+    Args:
+        site (str): The site for which to train the model.
+        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting". Note that the model_params need to be appropriate for the chosen model type  
+        balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. Only applied to training data.
+        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
+        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
+        sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
+        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
+        model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
+        return_scores (bool): Whether to return the evaluation scores as a dictionary.
+        verbose (bool): Whether to print verbose output.
+    Returns:
+        Model: The trained model.
+    """
+
+    # Get the training data
+    if verbose: print(f"Training {model_type} model for site: {site}")
+    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
+                               time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
+    
+    if sample_weights is not None:
+        if verbose: print("Calculating sample weights...")
+        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
+
+    if verbose:
+        print(f"Number of training points: {len(y)}")
+        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+
+    ## need to add default model_params! 
+    if model_params is None:
+        model_params = {}
+    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
+    if model_type not in valid_model_types:
+        raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
+    if model_type == "mlp":
+        model = MLPClassifier(**model_params, random_state=42)
+    elif model_type == "random_forest":
+        model = RandomForestClassifier(**model_params, random_state=42)
+    elif model_type == "gradient_boosting":
+        model = GradientBoostingClassifier(**model_params, random_state=42)
+    
+    # Fit the model
+    if verbose: print("... fitting")
+    if sample_weights is not None:
+        model.fit(X, y, sample_weight=weights)
+    else:
+        model.fit(X, y)
+
+    # Validation
+    X_val, y_val = get_train_test_data(site, "validation",
+                                       time_shift_hours=time_shift_hours, verbose=verbose)
+
+    # Testing
+    #TODO: Testing on unbalanced data?
+    X_test, y_test = get_train_test_data(site, "test",
+                                         time_shift_hours=time_shift_hours, verbose=verbose)
+                                         
+
+    if verbose: print("... predicting")
+    if prediction_threshold != 0.5:
+        if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
+    y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
+
+    # calculating scores
+    # run each set of tests only if there are positive examples, otherwise return zero
+    if sum(y_pred_val) == 0:
+        precision_val = 0.0
+        recall_val = 0.0
+        f1_val = 0.0
+    else:
+        precision_val = precision_score(y_val, y_pred_val)
+        recall_val = recall_score(y_val, y_pred_val)
+        f1_val = f1_score(y_val, y_pred_val)
+
+    if sum(y_pred_train) == 0:
+        precision_train = 0.0
+        recall_train = 0.0
+        f1_train = 0.0
+    else:
+        precision_train = precision_score(y, y_pred_train)
+        recall_train = recall_score(y, y_pred_train)
+        f1_train = f1_score(y, y_pred_train)
+
+    if sum(y_pred_test) == 0:
+        precision_test = 0.0
+        recall_test = 0.0
+        f1_test = 0.0
+    else:
+        precision_test = precision_score(y_test, y_pred_test)
+        recall_test = recall_score(y_test, y_pred_test)
+        f1_test = f1_score(y_test, y_pred_test)
+
+    if verbose:
+        print(f"Precision on Training Set = {precision_train:.3f}")
+        print(f"Precision on Validation Set = {precision_val:.3f}")
+        print(f"Precision on Test Set = {precision_test:.3f}")
+        print(f"Recall on Training Set = {recall_train:.3f}")
+        print(f"Recall on Validation Set = {recall_val:.3f}")
+        print(f"Recall on Test Set = {recall_test:.3f}")
+        print(f"F1 Score on Training Set = {f1_train:.3f}")
+        print(f"F1 Score on Validation Set = {f1_val:.3f}")
+        print(f"F1 Score on Test Set = {f1_test:.3f}")
+
+    if return_scores: 
+        scores = {
+            "precision_train": precision_train,
+            "precision_val": precision_val,
+            "precision_test": precision_test,
+            "recall_train": recall_train,
+            "recall_val": recall_val,
+            "recall_test": recall_test,
+            "f1_train": f1_train,
+            "f1_val": f1_val,
+            "f1_test": f1_test
+        }
+        return model, X, y, scores
+    else:
+        return model, X, y
+
+
+
+
+
+def get_default_params_grid(model_type):
+    """ Retrieve a default dictionary of hyperparameters to tune in a grid search for a given model.
+
+    Args:
+        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting".
+
+    Returns:
+        param_grid (dict): A dictionary containing model hyperparameters to tune.
+    """
+
+    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
+    if model_type not in valid_model_types:
+            raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
+
+    if model_type == "mlp":
+        param_grid = {
+            'hidden_layer_sizes': [(100,), (50,),],
+            'activation': ['relu', 'logisitic',],
+            'solver': ['adam',],
+            'alpha': [0.0001,],
+            'batch_size': [5, 10, 'auto',],
+            'max_iter': [1000, 500,],
+            'early_stopping': [True,],
+            'shuffle': [False, True,]
+        }
+    elif model_type == "random_forest":
+        param_grid = {
+            'n_estimators': [100, 50, 200,],
+            'criterion': ['gini', 'entropy',],
+            'max_depth': [None, 5, 10,],
+            'min_samples_split': [2, 5, 10,],
+            'max_features': ['log2', 'sqrt', None],
+            'bootstrap': [True, False],
+        }
+    elif model_type == "gradient_boosting":
+        param_grid = {
+            'loss': ['log_loss', 'exponential'],
+            'learning_rate': [0.1, 0.2, 0.5,],
+            'n_estimators': [100, 50, 200],
+            'criterion': ['friedman_mse', 'squared_error'],
+            'min_samples_split': [2, 5, 10,],
+            'max_depth': [3, 5, 8, 10,],
+            'max_features': ['sqrt', 'log2'],
+        }
+
+    return param_grid
+
 
 def train_baseline_model_grid_search(site,
                           model_type="mlp",
                           scoring="f1",
                           param_grid=None,
                           data_kwargs=None,
-                          validation_keys=None):
+                          validation_keys=None,
+                          return_cv_scores=False):
     """ Train a model to classify baseline events using grid search for hyperparameter tuning.
 
     The grid search explores both the model hyperparameters in ``param_grid`` and
@@ -450,7 +641,7 @@ def train_baseline_model_grid_search(site,
         model_type (str): The type of model to train. Currently accepts "mlp", 
             "random_forest", or "gradient_boosting". Note that the param_grid
             needs to be appropriate for the chosen model type. 
-        scoring (str): The metric being optimised for.
+        scoring (str or list): Metrics to evaluate during grid search. Can be a single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]). If a list is provided, the first metric will be used for selecting the best model (refit), and scores for all metrics will be returned in cv_results if return_cv_scores is True.
         param_grid (dict, optional): A dictionary containing model
             hyperparameters to tune. If None, default values are used.
         data_kwargs (dict, optional): A dictionary where each key is a keyword
@@ -472,10 +663,14 @@ def train_baseline_model_grid_search(site,
             ``"time_shift_hours"``) should be included here; training-only
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
+        return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
 
     Returns:
         tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
             model, the winning hyperparameter dict, and the winning data-kwargs dict.
+
+        If ``return_cv_scores`` is True, a fourth element is returned:
+        cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
@@ -489,36 +684,7 @@ def train_baseline_model_grid_search(site,
         model = GradientBoostingClassifier(random_state=42)
 
     if param_grid is None:
-        if model_type == "mlp":
-            param_grid = {
-                'hidden_layer_sizes': [(50,),],
-                'activation': ['relu'],
-                'solver': ['adam'],
-                'alpha': [0.0001],
-                'batch_size': [5, 10],
-                'max_iter': [1000],
-                'early_stopping': [True],
-                'shuffle': [False]
-            }
-        if model_type == "random_forest":
-            param_grid = {
-                'n_estimators': [100, 50, 200,],
-                'criterion': ['gini', 'entropy',],
-                'max_depth': [None, 5, 10,],
-                'min_samples_split': [2, 5, 10,],
-                'max_features': ['log2', 'sqrt', None],
-                'bootstrap': [True, False],
-            }
-        if model_type == "gradient_boosting":
-            param_grid = {
-                'loss': ['log_loss', 'exponential'],
-                'learning_rate': [0.1, 0.2, 0.5,],
-                'n_estimators': [100, 50, 200],
-                'criterion': ['friedman_mse', 'squared_error'],
-                'min_samples_split': [2, 5, 10,],
-                'max_depth': [3, 5, 8, 10,],
-                'max_features': ['sqrt', 'log2'],  
-            }
+        param_grid = get_default_params_grid(model_type)
 
     if data_kwargs is None:
         data_kwargs = {"balance": [-1],
@@ -534,6 +700,12 @@ def train_baseline_model_grid_search(site,
     best_params_list = []
     best_scores_list = []
     best_data_kwargs_list = []
+    cv_results = {} 
+    
+    if type(scoring) == list:
+        refit = scoring[0]
+    else:
+        refit = True
 
     for combo in combos:
         combo_kw = dict(zip(keys, combo))
@@ -557,10 +729,11 @@ def train_baseline_model_grid_search(site,
             param_grid,
             scoring=scoring,
             cv=ps,
-            refit=False,
+            refit=refit,
             verbose=2,
-            n_jobs=-1
-        )
+            n_jobs=-1,
+            return_train_score=return_cv_scores,
+            )
 
         print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
         grid_search.fit(X_all, y_all)
@@ -571,6 +744,8 @@ def train_baseline_model_grid_search(site,
         best_params_list.append(grid_search.best_params_)
         best_scores_list.append(grid_search.best_score_)
         best_data_kwargs_list.append(combo_kw)
+        if return_cv_scores:
+            cv_results[str(combo_kw)] = pd.DataFrame(grid_search.cv_results_)
 
     # Find the best combination across all data-kwarg combos
     best_index = best_scores_list.index(max(best_scores_list))
@@ -600,4 +775,16 @@ def train_baseline_model_grid_search(site,
     print(f"    Recall = {recall_val:.3f}")
     print(f"    F1 Score = {f1_val:.3f}")
 
-    return best_model, best_best_params, best_combo_kw
+
+    # Build dictionary of cv results for all data kwarg combinations
+    if return_cv_scores:
+        # Combine all cv results into a single DataFrame, adding columns for the data kwargs
+        for data_kw, df in cv_results.items():
+            df["data_kwarg"] = data_kw
+            for key, value in eval(data_kw).items():
+                df[key] = str(value)
+        all_cv_results = pd.concat(cv_results.values(), ignore_index=True)
+
+        return best_model, best_best_params, best_combo_kw, all_cv_results
+    else:
+        return best_model, best_best_params, best_combo_kw
