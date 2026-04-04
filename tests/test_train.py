@@ -186,5 +186,37 @@ class TestInputPerVariableScaler:
         with pytest.raises(ValueError, match="feature_names must be provided"):
             scaler.transform(X)
 
+    def test_fit_on_one_dataset_transform_another(self):
+        # Goal: verify transform uses statistics learned from the fit dataset on new data.
+        train_df = pd.DataFrame(
+            {
+                "u10_0": [0.0, 1.0, 2.0, 3.0],
+                "u10_6": [10.0, 11.0, 12.0, 13.0],
+                "v10_0": [20.0, 21.0, 22.0, 23.0],
+                "v10_6": [30.0, 31.0, 32.0, 33.0],
+                "hour_of_day": [0, 6, 12, 18],
+                "day_of_year": [100, 101, 102, 103],
+            }
+        )
+        test_df = pd.DataFrame(
+            {
+                "u10_0": [1.5, 2.5],
+                "u10_6": [11.5, 12.5],
+                "v10_0": [21.5, 22.5],
+                "v10_6": [31.5, 32.5],
+                "hour_of_day": [3, 15],
+                "day_of_year": [100.5, 102.5],
+            }
+        )
+
+        scaler = InputPerVariableScaler(aux_variables=["hour_of_day", "day_of_year"])
+        scaler.fit(train_df)
+        transformed = scaler.transform(test_df)
+
+        expected = (test_df - train_df.mean()) / train_df.std(ddof=0)
+
+        assert list(transformed.columns) == list(test_df.columns)
+        assert np.allclose(transformed.values, expected.values, atol=1e-12)
+
 
 ## TODO add tests checking it works within the pipeline after file merging with main branch
