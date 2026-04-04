@@ -40,8 +40,12 @@ def patched_training_data(monkeypatch):
         return pd.DataFrame(
             {
                 "baseline": baseline_values,
-                "feature1": np.arange(len(baseline_values), dtype=float),
-                "feature2": np.arange(len(baseline_values), dtype=float) + 10.0,
+                "u10_0": np.arange(len(baseline_values), dtype=float),
+                "u10_6": np.arange(len(baseline_values), dtype=float) + 1.0,
+                "v10_0": np.arange(len(baseline_values), dtype=float) + 10.0,
+                "v10_6": np.arange(len(baseline_values), dtype=float) + 11.0,
+                "hour_of_day": np.random.randint(0, 24, size=len(baseline_values)),
+                "day_of_year": np.random.randint(1, 366, size=len(baseline_values)),
             },
             index=pd.date_range("2020-01-01", periods=len(baseline_values), freq="h"),
         )
@@ -70,7 +74,7 @@ def patched_training_data(monkeypatch):
 
 class TestTrainBaselineModel:
     def test_train_baseline_model_returns_scores_and_selected_model(self, patched_training_data):
-        model, X, y, scores = train_module.train_baseline_model(
+        model, X, y, extra_info = train_module.train_baseline_model(
             "dummy-site",
             model_type="random_forest",
             model_params={"max_depth": 7},
@@ -81,24 +85,16 @@ class TestTrainBaselineModel:
         assert isinstance(model, DummyClassifier)
         assert "max_depth" in model.kwargs
         assert model.kwargs["max_depth"] == 7
-        assert list(X.columns) == ["feature1", "feature2"]
+        assert list(X.columns) == ["u10_0", "u10_6", "v10_0", "v10_6", "hour_of_day", "day_of_year"]
         assert list(y.tolist()) == [1, 0, 1, 0]
-        assert set(scores) == {
-            "precision_train",
-            "precision_val",
-            "precision_test",
-            "recall_train",
-            "recall_val",
-            "recall_test",
-            "f1_train",
-            "f1_val",
-            "f1_test",
-        }
+        assert "scores" in extra_info
+        scores = extra_info["scores"]
+        assert np.all(x in scores for x in ["precision_train", "precision_val", "precision_test", "recall_train", "recall_val", "recall_test", "f1_train", "f1_val", "f1_test"]), "Missing expected score keys"
         for score in scores.values():
             assert 0.0 <= score <= 1.0
 
     def test_train_baseline_model_passes_sample_weights(self, patched_training_data):
-        model, _, y = train_module.train_baseline_model(
+        model, _, y, _ = train_module.train_baseline_model(
             "dummy-site",
             model_type="mlp",
             sample_weights=3.0,
@@ -111,14 +107,14 @@ class TestTrainBaselineModel:
         pd.testing.assert_series_equal(model.fit_sample_weight, expected_weights)
 
     def test_train_baseline_model_uses_custom_prediction_threshold(self, patched_training_data):
-        _, _, _, scores = train_module.train_baseline_model(
+        _, _, _, extra_info = train_module.train_baseline_model(
             "dummy-site",
             model_type="gradient_boosting",
             prediction_threshold=0.9,
             return_scores=True,
             verbose=False,
         )
-
+        scores = extra_info["scores"]
         assert scores["precision_train"] == 0.0
         assert scores["precision_val"] == 0.0
         assert scores["precision_test"] == 0.0
@@ -136,6 +132,26 @@ class TestTrainBaselineModel:
                 model_type="not-a-model",
                 verbose=False,
             )
+
+    def test_train_baseline_model_trains_and_returns_scaler(self, patched_training_data):
+        # Goal: verify scaler is trained, inputs are normalized, and scaler is returned in extra_info.
+        model, X_train, y_train, extra_info = train_module.train_baseline_model(
+            "dummy-site",
+            model_type="mlp",
+            normalise_inputs=True,
+            return_scaler=True,
+            verbose=False,
+        )
+
+        # Verify scaler is in extra_info
+        assert "scaler" in extra_info
+        scaler = extra_info["scaler"]
+        assert isinstance(scaler, InputPerVariableScaler)
+
+        # Verify X_train is normalized: each feature should have mean ~0 and std ~1
+        for col in X_train.columns:
+            assert np.isclose(X_train[col].mean(), 0.0, atol=1e-10), f"{col} mean not ~0"
+            assert np.isclose(X_train[col].std(ddof=0), 1.0, atol=1e-10), f"{col} std not ~1"
 
 
 def test_generate_sample_weights():

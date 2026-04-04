@@ -415,9 +415,9 @@ def train_baseline_model(site, model_type="mlp",
         recall_train = 0.0
         f1_train = 0.0
     else:
-        precision_train = precision_score(y, y_pred_train)
-        recall_train = recall_score(y, y_pred_train)
-        f1_train = f1_score(y, y_pred_train)
+        precision_train = precision_score(y_train, y_pred_train)
+        recall_train = recall_score(y_train, y_pred_train)
+        f1_train = f1_score(y_train, y_pred_train)
 
     if sum(y_pred_test) == 0:
         precision_test = 0.0
