@@ -65,7 +65,7 @@ def get_train_test_data(site, test_train,
     else:
         raise ValueError("test_train must be either 'train', 'test', 'validation', or 'full' (for a custom period from config, or for all datasets stacked)")
     
-    if verbose: print(f"Loading data for site: {site}, period: {start_year}-{end_year}")
+    if verbose: print(f"... loading {test_train} data for site: {site}, period: {start_year}-{end_year}")
 
     df_features = open_features(site,
                             start_year = start_year,
