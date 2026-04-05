@@ -3,11 +3,12 @@ import itertools
 import numpy as np
 import pandas as pd
 
-from sklearn.neural_network import MLPClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.neural_network import MLPClassifier
+
 from sklearn.metrics import precision_score, recall_score, f1_score
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.preprocessing import StandardScaler
 
 from ml_baselines.data import read_intem
 from ml_baselines.config import Config
@@ -241,13 +242,82 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
     return weights
 
 
+class InputPerVariableScaler:
+    def __init__(self, aux_variables=["hour_of_day", "day_of_year"]):
+        """
+        Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler.
+        This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale.
+        The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
+        """
+
+        self.scalers = {}
+        self.aux_variables = aux_variables.copy()
+    
+    def fit(self, X, feature_names=None):
+        if isinstance(X, np.ndarray) and feature_names is None:
+            raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
+        elif isinstance(X, np.ndarray) and feature_names is not None:
+            X = pd.DataFrame(X, columns=feature_names)
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("Input X must be a pandas DataFrame with relevant column names.")
+        
+        col_names = np.unique([col.split("_")[0] if col not in self.aux_variables else col for col in X.columns])
+        col_names = sorted(col_names, key=lambda x: int(''.join(filter(str.isdigit, x))) if any(c.isdigit() for c in x) else float('inf'))
+        col_names = [col for col in col_names if col not in self.aux_variables] + [col for col in self.aux_variables if col in col_names]
+        self.col_names = col_names
+
+        column_groups = { }
+        for col in col_names:
+            if col in self.aux_variables:
+                column_groups[col] = [col]
+            else:
+                column_groups[col] = [c for c in X.columns if c.startswith(col + "_")]
+
+        for group, columns in column_groups.items():
+            scaler = StandardScaler() # Use same scaler on all three sets
+
+            train_data = X[columns] if len(columns) > 1 else X[columns].values.reshape(-1, 1)
+            scaler.fit(train_data)
+            self.scalers[group] = scaler
+        
+
+    def transform(self, X, feature_names=None):
+        if isinstance(X, np.ndarray) and feature_names is None:
+            raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
+        elif isinstance(X, np.ndarray) and feature_names is not None:
+            X = pd.DataFrame(X, columns=feature_names)
+        if not isinstance(X, pd.DataFrame):
+            raise ValueError("Input X must be a pandas DataFrame with relevant column names.")
+        
+        # check that the model has been fitted
+        if self.scalers == {}:
+            raise ValueError("The scaler has not been fitted yet. Please call fit() before transform().")
+
+        transformed_groups = []
+        for group in self.col_names:
+            columns = [col for col in X.columns if col.startswith(group + "_")] if group not in self.aux_variables else [group]
+            scaler = self.scalers[group]
+
+            data = X[columns] if len(columns) > 1 else X[columns].values.reshape(-1, 1)
+            transformed_data = pd.DataFrame(scaler.transform(data), columns=columns, index=X.index)
+            transformed_groups.append(transformed_data)
+
+        X_transformed = pd.concat(transformed_groups, axis=1)
+        return X_transformed
+    
+    def fit_transform(self, X, feature_names=None):
+        self.fit(X, feature_names=feature_names)
+        return self.transform(X, feature_names=feature_names)
+
+
 def train_baseline_model(site, model_type="mlp",
             balance=0.5,
             balance_method="random",
             undersample=0,
             sample_weights=None,
+            normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, verbose=True):
+            model_params=None, return_scores=False, return_scaler=False, verbose=True):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -257,36 +327,37 @@ def train_baseline_model(site, model_type="mlp",
         balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
         undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
         sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
+        normalise_inputs (bool): Whether to normalise the input features based on category using InputPerVariableScaler.
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
+        return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
         verbose (bool): Whether to print verbose output.
     Returns:
         model: The trained model.
-        X (ndarray): The feature matrix used for training.
-        y (ndarray): The target labels used for training.
-
-        If ``return_scores`` is True, a fourth element is returned:
-        scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
+        X_train (pd.DataFrame): The feature matrix used for training.
+        y_train (pd.DataFrame): The target labels used for training.
+        extra_info (dict): A dictionary containing any additional information requested via the return_scores and return_scaler arguments. Keys may include "scores" (a dictionary of evaluation scores) and "scaler" (the fitted InputPerVariableScaler object).
     """
 
     # Get the training data
     if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
+    X_train, y_train = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
     if sample_weights is not None:
-        if verbose: print("Calculating sample weights...")
-        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
+        if verbose: print("... calculating sample weights")
+        weights = generate_sample_weights(y_train, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
 
     if verbose:
-        print(f"Number of training points: {len(y)}")
-        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
+        print(f"Number of training points: {len(y_train)}")
+        print(f"... number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
 
     # If non-specified, use default hyperparameters
     if model_params is None:
         model_params = {}
 
+    # Create model object
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
         raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
@@ -297,142 +368,35 @@ def train_baseline_model(site, model_type="mlp",
     elif model_type == "gradient_boosting":
         model = GradientBoostingClassifier(**model_params, random_state=42)
     
-    # Fit the model
-    if verbose: print("... fitting")
-    if sample_weights is not None:
-        model.fit(X, y, sample_weight=weights)
-    else:
-        model.fit(X, y)
-
-    # Validation
+    # Get the validation and testing data
     X_val, y_val = get_train_test_data(site, "validation",
                                        time_shift_hours=time_shift_hours, verbose=verbose)
-
-    # Testing
     #TODO: Testing on unbalanced data?
     X_test, y_test = get_train_test_data(site, "test",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
-                                         
 
-    if verbose:
-        print("... predicting")
-    if prediction_threshold != 0.5:
-        if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
-    y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
-    y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
-    y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
-
-    # calculating scores
-    precision_val = precision_score(y_val, y_pred_val)
-    precision_train = precision_score(y, y_pred_train)
-    precision_test = precision_score(y_test, y_pred_test)
-    recall_val = recall_score(y_val, y_pred_val)
-    recall_train = recall_score(y, y_pred_train)
-    recall_test = recall_score(y_test, y_pred_test)
-
-    f1_val = f1_score(y_val, y_pred_val)
-    f1_train = f1_score(y, y_pred_train)
-    f1_test = f1_score(y_test, y_pred_test)
-
-    if verbose:
-        print(f"Precision on Training Set = {precision_train:.3f}")
-        print(f"Precision on Validation Set = {precision_val:.3f}")
-        print(f"Precision on Test Set = {precision_test:.3f}")
-        print(f"Recall on Training Set = {recall_train:.3f}")
-        print(f"Recall on Validation Set = {recall_val:.3f}")
-        print(f"Recall on Test Set = {recall_test:.3f}")
-        print(f"F1 Score on Training Set = {f1_train:.3f}")
-        print(f"F1 Score on Validation Set = {f1_val:.3f}")
-        print(f"F1 Score on Test Set = {f1_test:.3f}")
-
-    if return_scores: 
-        scores = {
-            "precision_train": precision_train,
-            "precision_val": precision_val,
-            "precision_test": precision_test,
-            "recall_train": recall_train,
-            "recall_val": recall_val,
-            "recall_test": recall_test,
-            "f1_train": f1_train,
-            "f1_val": f1_val,
-            "f1_test": f1_test
-        }
-        return model, X, y, scores
+    if normalise_inputs:
+        if verbose: print("... normalising inputs")
+        scaler = InputPerVariableScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_val = scaler.transform(X_val)
+        X_test = scaler.transform(X_test)
     else:
-        return model, X, y
+        scaler = None
 
-def train_baseline_model(site, model_type="mlp",
-            balance=0.5,
-            balance_method="random",
-            undersample=0,
-            sample_weights=None,
-            time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, verbose=True):
-    """ Train a model to classify baseline events for a given site.
-
-    Args:
-        site (str): The site for which to train the model.
-        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting". Note that the model_params need to be appropriate for the chosen model type  
-        balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. Only applied to training data.
-        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
-        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
-        sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
-        return_scores (bool): Whether to return the evaluation scores as a dictionary.
-        verbose (bool): Whether to print verbose output.
-    Returns:
-        Model: The trained model.
-    """
-
-    # Get the training data
-    if verbose: print(f"Training {model_type} model for site: {site}")
-    X, y = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
-                               time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
-    
-    if sample_weights is not None:
-        if verbose: print("Calculating sample weights...")
-        weights = generate_sample_weights(y, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
-
-    if verbose:
-        print(f"Number of training points: {len(y)}")
-        print(f"... number of baseline points: {sum(y == 1)} ({sum(y == 1) / len(y):.1%})")
-
-    ## need to add default model_params! 
-    if model_params is None:
-        model_params = {}
-    valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
-    if model_type not in valid_model_types:
-        raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
-    if model_type == "mlp":
-        model = MLPClassifier(**model_params, random_state=42)
-    elif model_type == "random_forest":
-        model = RandomForestClassifier(**model_params, random_state=42)
-    elif model_type == "gradient_boosting":
-        model = GradientBoostingClassifier(**model_params, random_state=42)
-    
     # Fit the model
     if verbose: print("... fitting")
     if sample_weights is not None:
-        model.fit(X, y, sample_weight=weights)
+        model.fit(X_train, y_train, sample_weight=weights)
     else:
-        model.fit(X, y)
+        model.fit(X_train, y_train)
 
-    # Validation
-    X_val, y_val = get_train_test_data(site, "validation",
-                                       time_shift_hours=time_shift_hours, verbose=verbose)
-
-    # Testing
-    #TODO: Testing on unbalanced data?
-    X_test, y_test = get_train_test_data(site, "test",
-                                         time_shift_hours=time_shift_hours, verbose=verbose)
-                                         
-
+    # Make predictions
     if verbose: print("... predicting")
     if prediction_threshold != 0.5:
         if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
     y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
-    y_pred_train = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
+    y_pred_train = (model.predict_proba(X_train)[:, 1] >= prediction_threshold).astype(int)
     y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
 
     # calculating scores
@@ -451,9 +415,9 @@ def train_baseline_model(site, model_type="mlp",
         recall_train = 0.0
         f1_train = 0.0
     else:
-        precision_train = precision_score(y, y_pred_train)
-        recall_train = recall_score(y, y_pred_train)
-        f1_train = f1_score(y, y_pred_train)
+        precision_train = precision_score(y_train, y_pred_train)
+        recall_train = recall_score(y_train, y_pred_train)
+        f1_train = f1_score(y_train, y_pred_train)
 
     if sum(y_pred_test) == 0:
         precision_test = 0.0
@@ -475,6 +439,8 @@ def train_baseline_model(site, model_type="mlp",
         print(f"F1 Score on Validation Set = {f1_val:.3f}")
         print(f"F1 Score on Test Set = {f1_test:.3f}")
 
+    extra_info = {}
+    
     if return_scores: 
         scores = {
             "precision_train": precision_train,
@@ -487,11 +453,11 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
-        return model, X, y, scores
-    else:
-        return model, X, y
-
-
+        extra_info["scores"] = scores
+    if return_scaler:
+        extra_info["scaler"] = scaler
+    
+    return model, X_train, y_train, extra_info
 
 
 

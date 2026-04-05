@@ -406,8 +406,9 @@ def open_features(site,
         ]
         df = df.join(shifted_dfs, how="left")
 
-    # Add hour of day column
+    # Add hour of day and day of year column
     df["hour_of_day"] = df.index.hour
+    df["day_of_year"] = df.index.day_of_year
 
     return df
 
