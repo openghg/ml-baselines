@@ -117,7 +117,7 @@ def read_agage(site, species,
 
     if agage_path.suffix == ".zip":
         # Assume there is a version number in the archive name
-        version = agage_path.stem.split("-")[-1]
+        version = agage_path.stem.split("-")[-1].split("_")[-1]
 
         with zipfile.ZipFile(agage_path, 'r') as zf:
             # Extract the file for a specific site/species

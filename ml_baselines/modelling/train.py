@@ -55,8 +55,17 @@ def get_train_test_data(site, test_train,
     elif test_train == "validation":
         start_year = cfg.validation_period[site][0]
         end_year = cfg.validation_period[site][1]
+        # check if config has full_period attribute
+    elif test_train == "full" and cfg.full_period[site] is not None:
+        start_year = cfg.full_period[site][0]
+        end_year = cfg.full_period[site][1]
+    elif test_train == "full":
+        start_year = cfg.training_period[site][0]
+        end_year = cfg.testing_period[site][1]
     else:
-        raise ValueError("test_train must be either 'train', 'test', or 'validation'")
+        raise ValueError("test_train must be either 'train', 'test', 'validation', or 'full' (for a custom period from config, or for all datasets stacked)")
+    
+    if verbose: print(f"Loading data for site: {site}, period: {start_year}-{end_year}")
 
     df_features = open_features(site,
                             start_year = start_year,
@@ -242,7 +251,7 @@ class InputPerVariableScaler:
         """
 
         self.scalers = {}
-        self.aux_variables = aux_variables
+        self.aux_variables = aux_variables.copy()
     
     def fit(self, X, feature_names=None):
         if isinstance(X, np.ndarray) and feature_names is None:
@@ -308,7 +317,7 @@ def train_baseline_model(site, model_type="mlp",
             sample_weights=None,
             normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, verbose=True):
+            model_params=None, return_scores=False, return_scaler=False, verbose=True):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -322,15 +331,13 @@ def train_baseline_model(site, model_type="mlp",
         time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
         model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
+        return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
         verbose (bool): Whether to print verbose output.
     Returns:
         model: The trained model.
         X_train (pd.DataFrame): The feature matrix used for training.
         y_train (pd.DataFrame): The target labels used for training.
-        scaler (InputPerVariableScaler or None): If  ``normalise_inputs`` is true, returns fitted scaler used to normalise input features to be applied to new data. Otherwise, returns None.
-
-        If ``return_scores`` is True, a fourth element is returned:
-        scores (dict): A dictionary of evaluation scores (e.g. precision, recall, F1).
+        extra_info (dict): A dictionary containing any additional information requested via the return_scores and return_scaler arguments. Keys may include "scores" (a dictionary of evaluation scores) and "scaler" (the fitted InputPerVariableScaler object).
     """
 
     # Get the training data
@@ -392,17 +399,34 @@ def train_baseline_model(site, model_type="mlp",
     y_pred_train = (model.predict_proba(X_train)[:, 1] >= prediction_threshold).astype(int)
     y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
 
-    # Calculate scores
-    precision_val = precision_score(y_val, y_pred_val)
-    precision_train = precision_score(y_train, y_pred_train)
-    precision_test = precision_score(y_test, y_pred_test)
-    recall_val = recall_score(y_val, y_pred_val)
-    recall_train = recall_score(y_train, y_pred_train)
-    recall_test = recall_score(y_test, y_pred_test)
+    # calculating scores
+    # run each set of tests only if there are positive examples, otherwise return zero
+    if sum(y_pred_val) == 0:
+        precision_val = 0.0
+        recall_val = 0.0
+        f1_val = 0.0
+    else:
+        precision_val = precision_score(y_val, y_pred_val)
+        recall_val = recall_score(y_val, y_pred_val)
+        f1_val = f1_score(y_val, y_pred_val)
 
-    f1_val = f1_score(y_val, y_pred_val)
-    f1_train = f1_score(y_train, y_pred_train)
-    f1_test = f1_score(y_test, y_pred_test)
+    if sum(y_pred_train) == 0:
+        precision_train = 0.0
+        recall_train = 0.0
+        f1_train = 0.0
+    else:
+        precision_train = precision_score(y_train, y_pred_train)
+        recall_train = recall_score(y_train, y_pred_train)
+        f1_train = f1_score(y_train, y_pred_train)
+
+    if sum(y_pred_test) == 0:
+        precision_test = 0.0
+        recall_test = 0.0
+        f1_test = 0.0
+    else:
+        precision_test = precision_score(y_test, y_pred_test)
+        recall_test = recall_score(y_test, y_pred_test)
+        f1_test = f1_score(y_test, y_pred_test)
 
     if verbose:
         print(f"Precision on Training Set = {precision_train:.3f}")
@@ -415,6 +439,8 @@ def train_baseline_model(site, model_type="mlp",
         print(f"F1 Score on Validation Set = {f1_val:.3f}")
         print(f"F1 Score on Test Set = {f1_test:.3f}")
 
+    extra_info = {}
+    
     if return_scores: 
         scores = {
             "precision_train": precision_train,
@@ -427,9 +453,12 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
-        return model, X_train, y_train, scores, scaler
-    else:
-        return model, X_train, y_train, scaler
+        extra_info["scores"] = scores
+    if return_scaler:
+        extra_info["scaler"] = scaler
+    
+    return model, X_train, y_train, extra_info
+
 
 
 def get_default_params_grid(model_type):

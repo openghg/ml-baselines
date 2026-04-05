@@ -4,7 +4,8 @@
         "coords": [53.3267, -9.9046],
         "training_period": [2016, 2018],
         "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "testing_period": [2020, 2023],
+        "full_period": [2010, 2023]
     },
     "RPB": {
         "name": "Ragged Point, Barbados",
