@@ -144,9 +144,11 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
 
         if method == "random":
             # Randomly sample the majority values
-            sampled_majority_indices = np.random.choice(majority_indices_to_subsample,
+            rng = np.random.RandomState(42)
+            sampled_majority_indices = rng.choice(majority_indices_to_subsample,
                                                         size=int(undersample_ratio * majority_count),
-                                                        replace=False)
+                                                        replace=False,
+                                                        )
         elif method == "deterministic":
             # Deterministically sample the majority values (sample evenly)
             desired_count = int(np.round(undersample_ratio * majority_count))
