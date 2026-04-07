@@ -2,5 +2,7 @@ pandas
 scikit-learn>=1.7
 numpy
 xarray
+dask
 cdsapi
 netcdf4
+matplotlib
