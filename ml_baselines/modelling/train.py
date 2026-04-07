@@ -543,7 +543,10 @@ def train_baseline_model_grid_search(site,
                           param_grid=None,
                           data_kwargs=None,
                           validation_keys=None,
-                          return_cv_scores=False, save_cv_scores_folder=None):
+                          return_cv_scores=False, 
+                          save_cv_scores=False,
+                          save_cv_scores_folder=cfg.models_path,
+                          save_suffix=None):
     """ Train a model to classify baseline events using grid search for hyperparameter tuning.
 
     The grid search explores both the model hyperparameters in ``param_grid`` and
@@ -698,10 +701,15 @@ def train_baseline_model_grid_search(site,
                 df[key] = str(value)
         all_cv_results = pd.concat(cv_results.values(), ignore_index=True)
 
-        if save_cv_scores_folder is not None:
-            save_path = Path(save_cv_scores_folder) / site 
-            save_path.mkdir(parents=True, exist_ok=True)
-            all_cv_results.to_csv(f"{save_cv_scores_folder}/cv_results_{site}_{model_type}.csv", index=False)
+        if save_cv_scores:
+            if save_cv_scores_folder is not None:
+                save_filename = f"cv_results_{site}_{model_type}_{save_suffix}.csv" if save_suffix is not None else f"cv_results_{site}_{model_type}.csv"
+                save_path = Path(save_cv_scores_folder) / site 
+                save_path.mkdir(parents=True, exist_ok=True)
+                all_cv_results.to_csv(save_filename, index=False)
+                print(f"CV scores saved to {save_path / save_filename}")
+            else:
+                print("Could not save CV scores! save_cv_scores_folder must be provided if save_cv_scores is True.")
 
         return best_model, best_best_params, best_combo_kw, all_cv_results
     else:
