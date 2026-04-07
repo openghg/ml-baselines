@@ -10,7 +10,7 @@ from ml_baselines.config import Config
 cfg = Config()
 
 
-def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", verbose=True, save_preds = False, return_proba=False):
+def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
     """
     Predict baseline events for a given site using a trained model.
 
@@ -37,6 +37,9 @@ def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.
     if verbose: print(f"Predicting on {prediction_mode} set for site: {site} with prediction threshold: {prediction_threshold}")
 
     X, y = get_train_test_data(site, prediction_mode, time_shift_hours=time_shift_hours, verbose=verbose)    
+
+    if scaler is not None:
+        X = scaler.transform(X)
 
     y_pred = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
     y_proba = model.predict_proba(X)[:, 1]
