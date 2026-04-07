@@ -321,7 +321,7 @@ def train_baseline_model(site, model_type="mlp",
             sample_weights=None,
             normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path):
+            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path, save_suffix=None):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -338,7 +338,8 @@ def train_baseline_model(site, model_type="mlp",
         return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
         verbose (bool): Whether to print verbose output.
         save_model (bool): Whether to save the trained model.
-        save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp. 
+        save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp.
+        save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
     Returns:
         model: The trained model.
         X_train (pd.DataFrame): The feature matrix used for training.
@@ -478,7 +479,7 @@ def train_baseline_model(site, model_type="mlp",
                 "info": info_to_save,
             }
 
-            save_path = Path(save_folder) / site / f"{model_type}_model_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.joblib"
+            save_path = Path(save_folder) / site / f"{model_type}_model_{datetime.now().strftime('%Y-%m-%d_%H-%M')}{f'_{save_suffix}' if save_suffix is not None else ''}.joblib"
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             joblib.dump(to_save, save_path)
