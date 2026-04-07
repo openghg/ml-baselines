@@ -1,5 +1,8 @@
 import numpy as np
 import pandas as pd
+import joblib
+import glob
+from pathlib import Path
 
 from sklearn.metrics import precision_score, recall_score, f1_score
 
@@ -9,8 +12,31 @@ from ml_baselines.modelling.plot import plot_confusion_matrix, plot_obs, plot_ob
 from ml_baselines.config import Config
 cfg = Config()
 
+def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, timestamp=None):
+    """
+    Load a trained model and its extra info from a specified folder. If timestamp is provided, it will look for a model file with that timestamp; otherwise, it will load the most recent model file for the given site and model type.
 
-def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", verbose=True, save_preds = False, return_proba=False):
+    Args:
+    site (str): The site for which to load the model.
+    model_type (str): The type of model to load (default is "mlp").
+    models_folder (str): The folder where models are stored (default is cfg.models_path).
+    timestamp (str, optional): The timestamp to look for in the model filename. If None, loads the most recent model.
+    
+    Returns:
+    model: The loaded model object.
+    extra_info: A dictionary containing extra information about the model (e.g., scores, scaler, model inputs).
+    """
+    model_path = Path(models_folder) / site / f"{model_type}_model_*.joblib"
+    if timestamp is not None:
+        model_path = model_path.with_name(f"{model_type}_model_{timestamp}.joblib")
+    model_file = glob.glob(str(model_path))
+    if not model_file:
+        raise FileNotFoundError(f"No model found at {model_path}")
+    model_dict = joblib.load(model_file[-1])  # Load the most recent model file
+    print(f"Loaded model from {model_file[-1]}")
+    return model_dict['model'], model_dict['extra_info']
+
+def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
     """
     Predict baseline events for a given site using a trained model.
 
@@ -37,6 +63,9 @@ def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.
     if verbose: print(f"Predicting on {prediction_mode} set for site: {site} with prediction threshold: {prediction_threshold}")
 
     X, y = get_train_test_data(site, prediction_mode, time_shift_hours=time_shift_hours, verbose=verbose)    
+
+    if scaler is not None:
+        X = scaler.transform(X)
 
     y_pred = (model.predict_proba(X)[:, 1] >= prediction_threshold).astype(int)
     y_proba = model.predict_proba(X)[:, 1]

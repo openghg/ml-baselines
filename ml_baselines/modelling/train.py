@@ -1,4 +1,6 @@
 import itertools
+from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -319,7 +321,7 @@ def train_baseline_model(site, model_type="mlp",
             sample_weights=None,
             normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, return_scaler=False, verbose=True):
+            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -335,6 +337,8 @@ def train_baseline_model(site, model_type="mlp",
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
         return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
         verbose (bool): Whether to print verbose output.
+        save_model (bool): Whether to save the trained model.
+        save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp. 
     Returns:
         model: The trained model.
         X_train (pd.DataFrame): The feature matrix used for training.
@@ -443,8 +447,7 @@ def train_baseline_model(site, model_type="mlp",
 
     extra_info = {}
     
-    if return_scores: 
-        scores = {
+    scores = {
             "precision_train": precision_train,
             "precision_val": precision_val,
             "precision_test": precision_test,
@@ -455,9 +458,31 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
+    if return_scores: 
         extra_info["scores"] = scores
     if return_scaler:
         extra_info["scaler"] = scaler
+
+    if save_model:
+        if save_folder is None:
+            print("Could not save the model! save_folder must be provided if save_model is True.")
+        else:
+            import joblib
+            # package up the model and extra info
+            # if scaler isnt returned save it anyway
+            
+            info_to_save = {"scores": scores, "scaler": scaler, "model_inputs": {"model_params": model_params, "balance": balance, "balance_method": balance_method, "undersample": undersample, "sample_weights": sample_weights, "normalise_inputs": normalise_inputs, "time_shift_hours": time_shift_hours, "prediction_threshold": prediction_threshold}}
+
+            to_save  = {
+                "model": model,
+                "info": info_to_save,
+            }
+
+            save_path = Path(save_folder) / site / f"{model_type}_model_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.joblib"
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            joblib.dump(to_save, save_path)
+            if verbose: print(f"Model saved to {save_path}")
     
     return model, X_train, y_train, extra_info
 
@@ -517,7 +542,7 @@ def train_baseline_model_grid_search(site,
                           param_grid=None,
                           data_kwargs=None,
                           validation_keys=None,
-                          return_cv_scores=False):
+                          return_cv_scores=False, save_cv_scores_folder=None):
     """ Train a model to classify baseline events using grid search for hyperparameter tuning.
 
     The grid search explores both the model hyperparameters in ``param_grid`` and
@@ -551,7 +576,7 @@ def train_baseline_model_grid_search(site,
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
         return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
-
+        save_cv_scores_folder (str, optional): The folder where to save the grid search results as a csv from the pandas dataset, if return_cv_scores is True. If None, the results will not be saved to a csv.
     Returns:
         tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
             model, the winning hyperparameter dict, and the winning data-kwargs dict.
@@ -671,6 +696,11 @@ def train_baseline_model_grid_search(site,
             for key, value in eval(data_kw).items():
                 df[key] = str(value)
         all_cv_results = pd.concat(cv_results.values(), ignore_index=True)
+
+        if save_cv_scores_folder is not None:
+            save_path = Path(save_cv_scores_folder) / site 
+            save_path.mkdir(parents=True, exist_ok=True)
+            all_cv_results.to_csv(f"{save_cv_scores_folder}/cv_results_{site}_{model_type}.csv", index=False)
 
         return best_model, best_best_params, best_combo_kw, all_cv_results
     else:
