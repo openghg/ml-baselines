@@ -34,7 +34,7 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
         raise FileNotFoundError(f"No model found at {model_path}")
     model_dict = joblib.load(model_file[-1])  # Load the most recent model file
     print(f"Loaded model from {model_file[-1]}")
-    return model_dict['model'], model_dict['extra_info']
+    return model_dict['model'], model_dict['info']
 
 def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
     """
