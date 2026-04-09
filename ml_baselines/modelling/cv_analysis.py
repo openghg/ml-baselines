@@ -23,7 +23,7 @@ def load_cv_results(site, save_suffix, model_type, save_path=cfg.models_path) ->
         DataFrame with all columns as-is, plus recalculated rank_test_<metric>
         columns that are global across all data_kwarg groups.
     """
-    filename = f"cv_results_{site}_{model_type}_model.csv" if save_suffix is None else f"cv_results_{site}_{model_type}_{save_suffix}.csv"
+    filename = f"cv_results_{site}_{model_type}.csv" if save_suffix is None else f"cv_results_{site}_{model_type}_{save_suffix}.csv"
     filepath = Path(save_path) / site / filename
 
     if not filepath.exists():

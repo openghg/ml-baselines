@@ -34,7 +34,7 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
     elif suffix is not None:
         model_path = model_path.with_name(f"{model_type}_model_*{suffix}.joblib")
         
-    model_file = glob.glob(str(model_path))
+    model_file = sorted(glob.glob(str(model_path)))
     if not model_file:
         raise FileNotFoundError(f"No model found at {model_path}")
     model_dict = joblib.load(model_file[-1])  # Load the most recent model file
