@@ -102,7 +102,7 @@ def get_train_test_data(site, test_train,
             # raise value error if df is now empty
             if df.shape[0] == 0:
                 raise ValueError(f"No data available for {site} in the test period after removing overlapping data with training and validation periods! Please check the periods specified in the config.")
-                
+
     # Drop any nan values
     df = df.dropna()
 
@@ -494,15 +494,15 @@ def train_baseline_model(site, model_type="mlp",
         print(f"Precision on Training Set = {precision_train:.3f}")
         if X_train_unbalanced is not None: print(f"Precision on the original Training Set = {precision_train_unbalanced:.3f}")
         print(f"Precision on Validation Set = {precision_val:.3f}")
-        print(f"Precision on Test Set = {precision_test:.3f}")
+        if evaluate_on_test: print(f"Precision on Test Set = {precision_test:.3f}")
         print(f"Recall on Training Set = {recall_train:.3f}")
         if X_train_unbalanced is not None: print(f"Recall on the original Training Set = {recall_train_unbalanced:.3f}")
         print(f"Recall on Validation Set = {recall_val:.3f}")
-        print(f"Recall on Test Set = {recall_test:.3f}")
+        if evaluate_on_test: print(f"Recall on Test Set = {recall_test:.3f}")
         print(f"F1 Score on Training Set = {f1_train:.3f}")
         if X_train_unbalanced is not None: print(f"F1 Score on the original Training Set = {f1_train_unbalanced:.3f}")
         print(f"F1 Score on Validation Set = {f1_val:.3f}")
-        print(f"F1 Score on Test Set = {f1_test:.3f}")
+        if evaluate_on_test: print(f"F1 Score on Test Set = {f1_test:.3f}")
 
     extra_info = {}
     
