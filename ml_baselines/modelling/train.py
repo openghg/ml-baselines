@@ -32,106 +32,7 @@ def get_train_test_data(site, test_train,
 
     Args:
         site (str): The site for which to get the data.
-        test_train (str): The type of data to get. Must be one of 'train', 'test', or 'validation'.
-        balance (bool): If True, balance the dataset by undersampling the majority class.
-            NOTE: This is only applied to training data (ignored for test or validation).
-        undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
-            NOTE: This is only applied to training data (ignored for test or validation).
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
-        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
-        verbose (bool): If True, print verbose output.
-    Returns:
-        pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
-                                If return_dataframe is False, returns a tuple (X, y) where X is the features and y is the target.
-
-    Raises:
-        ValueError: If the test_train argument is not one of 'train', 'test', or 'validation'.
-    """
-
-    if test_train == "train":
-        start_year = cfg.training_period[site][0]
-        end_year = cfg.training_period[site][1]
-    elif test_train == "test":
-        start_year = cfg.testing_period[site][0]
-        end_year = cfg.testing_period[site][1]
-    elif test_train == "validation":
-        start_year = cfg.validation_period[site][0]
-        end_year = cfg.validation_period[site][1]
-        # check if config has full_period attribute
-    elif test_train == "full" and cfg.full_period[site] is not None:
-        start_year = cfg.full_period[site][0]
-        end_year = cfg.full_period[site][1]
-    elif test_train == "full":
-        start_year = cfg.training_period[site][0]
-        end_year = cfg.testing_period[site][1]
-    else:
-        raise ValueError("test_train must be either 'train', 'test', 'validation', or 'full' (for a custom period from config, or for all datasets stacked)")
-    
-    if verbose: print(f"... loading {test_train} data for site: {site}, period: {start_year}-{end_year}")
-
-    df_features = open_features(site,
-                            start_year = start_year,
-                            end_year = end_year,
-                            time_shift_hours = time_shift_hours)
-    df_intem = read_intem(site,
-                        start_year = start_year,
-                        end_year = end_year)
-
-    # Merge features and intem data on time. The intem flags should be merged with the nearest features in time
-    df = df_intem.merge(df_features, how='left', left_index=True, right_index=True)
-    
-    # Drop any nan values
-    df = df.dropna()
-
-    if df.shape[0] == 0:
-        raise ValueError(f"No data available for {site} in the specified period.")
-
-    # Check if the data is continuous
-    if not df.index.is_monotonic_increasing:
-        raise ValueError(f"Data for {site} is not continuous in the specified period.")
-    if not df.index.is_unique:
-        raise ValueError(f"Data for {site} has duplicate timestamps in the specified period.")
-
-    # Balance the dataset if required FOR TRAINING DATA ONLY
-    if balance > 0. and test_train == "train":
-        if verbose: print(f"... balancing dataset to target baseline ratio of {balance}")
-        if balance > 1:
-            raise ValueError("Balance must be between 0 and 1.")
-        # If balance is True, balance the dataset
-        df = balance_dataset(df, target_baseline_ratio=balance, method=balance_method)
-
-    # Undersample the dataset if required FOR TRAINING DATA ONLY
-    if undersample and test_train == "train":
-        if verbose: print(f"... undersampling dataset to fraction {undersample}")
-        if not (0. < undersample <= 1.):
-            raise ValueError("Undersample must be a float between 0 and 1.")
-        # Randomly undersample the dataset
-        # First shuffle the DataFrame
-        df = df.sample(frac=1, random_state=42).reset_index(drop=True)
-        # Then, just keep the first "undersample" rows
-        df = df.iloc[:int(undersample*len(df))]
-
-    if return_dataframe:
-        return df
-    else:
-        # Split the data into features and target
-        X = df.drop(columns=["baseline"])
-        y = df["baseline"]
-        return X, y
-
-
-def get_train_test_data_updated(site, test_train,
-                        balance=-1,
-                        undersample=0,
-                        time_shift_hours=[6],
-                        return_dataframe=False,
-                        balance_method="random", verbose=True):
-    """ Get the training, testing or validation data for a given site.
-
-    Args:
-        site (str): The site for which to get the data.
-        test_train (str): The type of data to get. Must be one of 'train', 'test', or 'validation'.
+        test_train (str): The type of data to get. Must be one of 'train', 'test', 'validation' or 'full', which will return a custom period from the config, or all datasets stacked.
         balance (bool): If True, balance the dataset by undersampling the majority class.
             NOTE: This is only applied to training data (ignored for test or validation).
         undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
@@ -189,10 +90,14 @@ def get_train_test_data_updated(site, test_train,
 
     # if its test mode, make sure that there is no overlap with training and val, and if so remove from df
     if test_train == "test":
+        if verbose: print("")
         train_period = periods_dict["train"]
         val_period = periods_dict["validation"]
-        df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
-        df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
+        # first, let's check if there is overlap between either training or validation period and the test period, and if so print a warning
+        if ((val_period[0] <= end_year) and (val_period[1] >= start_year)) or ((train_period[0] <= end_year) and (train_period[1] >= start_year)):
+            if verbose: print(f"Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
+            df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
+            df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
     
     # Drop any nan values
     df = df.dropna()
@@ -613,7 +518,7 @@ def train_baseline_model(site, model_type="mlp",
         scores["precision_train_unbalanced"] = precision_train_unbalanced
         scores["recall_train_unbalanced"] = recall_train_unbalanced
         scores["f1_train_unbalanced"] = f1_train_unbalanced
-        
+
     if return_scores: 
         extra_info["scores"] = scores
     if return_scaler:
