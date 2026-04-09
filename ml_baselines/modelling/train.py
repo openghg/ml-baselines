@@ -360,6 +360,7 @@ def train_baseline_model(site, model_type="mlp",
         return_scores (bool): Whether to return the evaluation scores as a dictionary.
         return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
         verbose (bool): Whether to print verbose output.
+        evaluate_on_test (bool): Whether to evaluate the model on the test set after training. If False, test-set metrics will not be computed or reported. Defaults to True.
         save_model (bool): Whether to save the trained model.
         save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp.
         save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
