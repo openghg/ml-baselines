@@ -98,7 +98,11 @@ def get_train_test_data(site, test_train,
             if verbose: print(f"Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
             df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
             df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
-    
+
+            # raise value error if df is now empty
+            if df.shape[0] == 0:
+                raise ValueError(f"No data available for {site} in the test period after removing overlapping data with training and validation periods! Please check the periods specified in the config.")
+                
     # Drop any nan values
     df = df.dropna()
 

@@ -34,6 +34,46 @@ class DummyClassifier:
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
 
 
+class DummyGridSearchCV:
+    instances = []
+
+    def __init__(self, estimator, param_grid, scoring=None, cv=None, refit=True, verbose=0, n_jobs=None, return_train_score=False):
+        self.estimator = estimator
+        self.param_grid = param_grid
+        self.scoring = scoring
+        self.cv = cv
+        self.refit = refit
+        self.verbose = verbose
+        self.n_jobs = n_jobs
+        self.return_train_score = return_train_score
+
+        self.fit_X = None
+        self.fit_y = None
+        self.fit_sample_weight = None
+        self.best_params_ = None
+        self.best_score_ = None
+        self.cv_results_ = None
+
+        DummyGridSearchCV.instances.append(self)
+
+    def fit(self, X, y, sample_weight=None):
+        self.fit_X = X.copy()
+        self.fit_y = y.copy()
+        self.fit_sample_weight = None if sample_weight is None else np.array(sample_weight, copy=True)
+
+        self.best_params_ = {
+            key: (value[0] if isinstance(value, list) else value)
+            for key, value in self.param_grid.items()
+        }
+        self.best_score_ = 0.0 if sample_weight is None else float(np.mean(sample_weight))
+        self.cv_results_ = {
+            "mean_test_score": np.array([self.best_score_]),
+            "rank_test_score": np.array([1]),
+            "params": [self.best_params_],
+        }
+        return self
+
+
 @pytest.fixture
 def patched_training_data(monkeypatch):
     def make_frame(baseline_values):
@@ -70,6 +110,49 @@ def patched_training_data(monkeypatch):
     monkeypatch.setattr(train_module, "MLPClassifier", DummyClassifier)
     monkeypatch.setattr(train_module, "RandomForestClassifier", DummyClassifier)
     monkeypatch.setattr(train_module, "GradientBoostingClassifier", DummyClassifier)
+
+
+@pytest.fixture
+def patched_grid_search_setup(monkeypatch):
+    DummyGridSearchCV.instances = []
+    get_data_calls = []
+
+    train_df = pd.DataFrame(
+        {
+            "baseline": [1, 0, 1, 0],
+            "u10_0": [1.0, 2.0, 3.0, 4.0],
+            "v10_0": [10.0, 11.0, 12.0, 13.0],
+        },
+        index=pd.date_range("2020-01-01", periods=4, freq="h"),
+    )
+    val_df = pd.DataFrame(
+        {
+            "baseline": [1, 0],
+            "u10_0": [5.0, 6.0],
+            "v10_0": [14.0, 15.0],
+        },
+        index=pd.date_range("2020-01-05", periods=2, freq="h"),
+    )
+
+    def fake_get_train_test_data(site, test_train, **kwargs):
+        get_data_calls.append((test_train, kwargs.copy()))
+        if test_train == "train":
+            df = train_df
+        elif test_train == "validation":
+            df = val_df
+        else:
+            raise AssertionError(f"Unexpected split requested in grid-search test: {test_train}")
+        return df.drop(columns=["baseline"]), df["baseline"]
+
+    monkeypatch.setattr(train_module, "get_train_test_data", fake_get_train_test_data)
+    monkeypatch.setattr(train_module, "GridSearchCV", DummyGridSearchCV)
+    monkeypatch.setattr(train_module, "MLPClassifier", DummyClassifier)
+
+    return {
+        "calls": get_data_calls,
+        "train_index": train_df.index,
+        "val_index": val_df.index,
+    }
 
 
 class TestTrainBaselineModel:
@@ -227,6 +310,40 @@ def test_balance_dataset():
     assert np.isclose(baseline_count / (baseline_count + non_baseline_count), 0.8, atol=0.01), "Baseline ratio is not 0.8"
     assert np.isclose(non_baseline_count / (baseline_count + non_baseline_count), 0.2, atol=0.01), "Non-baseline ratio is not 0.2"
 
+def test_get_train_test_data_removes_overlap_from_test_split(monkeypatch):
+    site = "dummy-site"
+
+    monkeypatch.setattr(train_module.cfg, "training_period", {site: (2019, 2019)}, raising=False)
+    monkeypatch.setattr(train_module.cfg, "validation_period", {site: (2020, 2020)}, raising=False)
+    monkeypatch.setattr(train_module.cfg, "testing_period", {site: (2019, 2021)}, raising=False)
+    monkeypatch.setattr(train_module.cfg, "full_period", {site: None}, raising=False)
+
+    idx = pd.to_datetime(
+        [
+            "2019-01-01 00:00", "2019-06-01 00:00",
+            "2020-01-01 00:00", "2020-06-01 00:00",
+            "2021-01-01 00:00", "2021-06-01 00:00",
+        ]
+    )
+
+    df_features = pd.DataFrame(
+        {
+            "u10_0": np.arange(len(idx), dtype=float),
+            "v10_0": np.arange(len(idx), dtype=float) + 10.0,
+        },
+        index=idx,
+    )
+    df_intem = pd.DataFrame({"baseline": [0, 1, 0, 1, 0, 1]}, index=idx)
+
+    monkeypatch.setattr(train_module, "open_features", lambda *args, **kwargs: df_features)
+    monkeypatch.setattr(train_module, "read_intem", lambda *args, **kwargs: df_intem)
+
+    X_test, y_test = train_module.get_train_test_data(site, "test", verbose=False)
+
+    assert set(X_test.index.year) == {2021}
+    assert len(X_test) == 2
+    assert len(y_test) == 2
+
 class TestInputPerVariableScaler:
     def test_fit_transform_dataframe(self):
         # Goal: verify grouped dataframe features are standardized and columns are preserved.
@@ -361,6 +478,78 @@ class TestInputPerVariableScaler:
 
         assert list(transformed.columns) == list(test_df.columns)
         assert np.allclose(transformed.values, expected.values, atol=1e-12)
+
+
+class TestTrainBaselineModelGridSearch:
+    def test_grid_search_passes_sample_weights_to_cv_fit(self, patched_grid_search_setup):
+        train_module.train_baseline_model_grid_search(
+            site="dummy-site",
+            model_type="mlp",
+            param_grid={"alpha": [0.1]},
+            data_kwargs={"time_shift_hours": [[6]], "sample_weights": [None, 3.0]},
+            validation_keys=["time_shift_hours"],
+        )
+
+        assert len(DummyGridSearchCV.instances) == 2
+        weighted_fit = [inst for inst in DummyGridSearchCV.instances if inst.fit_sample_weight is not None]
+        assert len(weighted_fit) == 1
+
+        sample_weight = weighted_fit[0].fit_sample_weight
+        assert len(sample_weight) == 6
+        assert np.allclose(sample_weight, np.array([3.0, 1.0, 3.0, 1.0, 1.0, 1.0]))
+
+    def test_grid_search_does_not_forward_sample_weights_to_data_loader(self, patched_grid_search_setup):
+        train_module.train_baseline_model_grid_search(
+            site="dummy-site",
+            model_type="mlp",
+            param_grid={"alpha": [0.1]},
+            data_kwargs={"time_shift_hours": [[6]], "sample_weights": [None, 2.0]},
+            validation_keys=["time_shift_hours"],
+        )
+
+        for _, kwargs in patched_grid_search_setup["calls"]:
+            assert "sample_weights" not in kwargs
+
+    def test_grid_search_rejects_unknown_data_kwargs_key(self, patched_grid_search_setup):
+        with pytest.raises(ValueError, match="Unknown data_kwargs keys"):
+            train_module.train_baseline_model_grid_search(
+                site="dummy-site",
+                model_type="mlp",
+                param_grid={"alpha": [0.1]},
+                data_kwargs={"time_shift_hours": [[6]], "bad_key": [123]},
+            )
+
+    def test_grid_search_uses_winning_sample_weights_in_final_fit(self, patched_grid_search_setup):
+        best_model, _, best_combo_kw = train_module.train_baseline_model_grid_search(
+            site="dummy-site",
+            model_type="mlp",
+            param_grid={"alpha": [0.1]},
+            data_kwargs={"time_shift_hours": [[6]], "sample_weights": [None, 3.0]},
+            validation_keys=["time_shift_hours"],
+        )
+
+        assert isinstance(best_model, DummyClassifier)
+        assert best_combo_kw["sample_weights"] == 3.0
+        assert best_model.fit_sample_weight is not None
+
+        expected_weights = pd.Series([3.0, 1.0, 3.0, 1.0], index=patched_grid_search_setup["train_index"])
+        pd.testing.assert_series_equal(best_model.fit_sample_weight, expected_weights)
+
+    def test_grid_search_returns_cv_scores_with_data_kwarg_metadata(self, patched_grid_search_setup):
+        _, _, best_combo_kw, all_cv_results = train_module.train_baseline_model_grid_search(
+            site="dummy-site",
+            model_type="mlp",
+            param_grid={"alpha": [0.1]},
+            data_kwargs={"balance": [-1], "time_shift_hours": [[6]], "sample_weights": [None, 2.0]},
+            validation_keys=["time_shift_hours"],
+            return_cv_scores=True,
+        )
+
+        assert "sample_weights" in best_combo_kw
+        assert "data_kwarg" in all_cv_results.columns
+        assert "param_data_sample_weights" in all_cv_results.columns
+        assert "param_data_balance" in all_cv_results.columns
+        assert set(all_cv_results["param_data_sample_weights"].unique()) == {"None", "2.0"}
 
 
 ## TODO add tests checking it works within the pipeline after file merging with main branch
