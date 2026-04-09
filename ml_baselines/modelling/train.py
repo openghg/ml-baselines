@@ -1,6 +1,7 @@
 import itertools
 from pathlib import Path
 from datetime import datetime
+import joblib
 
 import numpy as np
 import pandas as pd
@@ -434,7 +435,7 @@ def train_baseline_model(site, model_type="mlp",
             sample_weights=None,
             normalise_inputs=False,
             time_shift_hours=[6], prediction_threshold=0.5,
-            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path, save_suffix=None):
+            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path, save_suffix=None, evaluate_on_test=True, random_seed=42):
     """ Train a model to classify baseline events for a given site.
 
     Args:
@@ -453,6 +454,7 @@ def train_baseline_model(site, model_type="mlp",
         save_model (bool): Whether to save the trained model.
         save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp.
         save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
+        random_seed (int): The random seed to use for reproducible results.
     Returns:
         model: The trained model.
         X_train (pd.DataFrame): The feature matrix used for training.
@@ -464,6 +466,12 @@ def train_baseline_model(site, model_type="mlp",
     if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
     X_train, y_train = get_train_test_data(site, "train", balance=balance, balance_method=balance_method,
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
+    
+    if balance > 0 or undersample > 0:
+        X_train_unbalanced, y_train_unbalanced = get_train_test_data(site, "train", balance=-1, balance_method=balance_method, time_shift_hours=time_shift_hours, undersample=0, verbose=verbose)
+    else:
+        X_train_unbalanced, y_train_unbalanced = None, None
+
     
     if sample_weights is not None:
         if verbose: print("... calculating sample weights")
@@ -482,25 +490,30 @@ def train_baseline_model(site, model_type="mlp",
     if model_type not in valid_model_types:
         raise ValueError(f"Unknown model type: {model_type}! must be one of {valid_model_types}.")
     if model_type == "mlp":
-        model = MLPClassifier(**model_params, random_state=42)
+        model = MLPClassifier(**model_params, random_state=random_seed)
     elif model_type == "random_forest":
-        model = RandomForestClassifier(**model_params, random_state=42)
+        model = RandomForestClassifier(**model_params, random_state=random_seed)
     elif model_type == "gradient_boosting":
-        model = GradientBoostingClassifier(**model_params, random_state=42)
+        model = GradientBoostingClassifier(**model_params, random_state=random_seed)
     
     # Get the validation and testing data
     X_val, y_val = get_train_test_data(site, "validation",
                                        time_shift_hours=time_shift_hours, verbose=verbose)
-    #TODO: Testing on unbalanced data?
-    X_test, y_test = get_train_test_data(site, "test",
+    if evaluate_on_test:
+        X_test, y_test = get_train_test_data(site, "test",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
+
 
     if normalise_inputs:
         if verbose: print("... normalising inputs")
         scaler = InputPerVariableScaler()
         X_train = scaler.fit_transform(X_train)
         X_val = scaler.transform(X_val)
-        X_test = scaler.transform(X_test)
+        if evaluate_on_test:
+            X_test = scaler.transform(X_test)
+        if X_train_unbalanced is not None:
+            X_train_unbalanced = scaler.transform(X_train_unbalanced)
+
     else:
         scaler = None
 
@@ -517,7 +530,10 @@ def train_baseline_model(site, model_type="mlp",
         if verbose: print(f"Using custom prediction threshold of {prediction_threshold} instead of default 0.5")
     y_pred_val = (model.predict_proba(X_val)[:, 1] >= prediction_threshold).astype(int)
     y_pred_train = (model.predict_proba(X_train)[:, 1] >= prediction_threshold).astype(int)
-    y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
+    if evaluate_on_test:
+        y_pred_test = (model.predict_proba(X_test)[:, 1] >= prediction_threshold).astype(int)
+    if X_train_unbalanced is not None:
+        y_pred_train_unbalanced = (model.predict_proba(X_train_unbalanced)[:, 1] >= prediction_threshold).astype(int)
 
     # calculating scores
     # run each set of tests only if there are positive examples, otherwise return zero
@@ -539,23 +555,43 @@ def train_baseline_model(site, model_type="mlp",
         recall_train = recall_score(y_train, y_pred_train)
         f1_train = f1_score(y_train, y_pred_train)
 
-    if sum(y_pred_test) == 0:
-        precision_test = 0.0
-        recall_test = 0.0
-        f1_test = 0.0
+    if evaluate_on_test:
+        if sum(y_pred_test) == 0:
+            precision_test = 0.0
+            recall_test = 0.0
+            f1_test = 0.0
+        else:
+            precision_test = precision_score(y_test, y_pred_test)
+            recall_test = recall_score(y_test, y_pred_test)
+            f1_test = f1_score(y_test, y_pred_test)
     else:
-        precision_test = precision_score(y_test, y_pred_test)
-        recall_test = recall_score(y_test, y_pred_test)
-        f1_test = f1_score(y_test, y_pred_test)
+        precision_test = None
+        recall_test = None
+        f1_test = None
+    
+    if X_train_unbalanced is not None:
+        if sum(y_pred_train_unbalanced) == 0:
+            precision_train_unbalanced = 0.0
+            recall_train_unbalanced = 0.0
+            f1_train_unbalanced = 0.0
+        else:
+            precision_train_unbalanced = precision_score(y_train_unbalanced, y_pred_train_unbalanced)
+            recall_train_unbalanced = recall_score(y_train_unbalanced, y_pred_train_unbalanced)
+            f1_train_unbalanced = f1_score(y_train_unbalanced, y_pred_train_unbalanced)
 
     if verbose:
+        print("Evaluation scores:")
+        if X_train_unbalanced is not None: print("The training dataset was balanced or undersampled. Providing scores also on the original unbalanced training set")
         print(f"Precision on Training Set = {precision_train:.3f}")
+        if X_train_unbalanced is not None: print(f"Precision on the original Training Set = {precision_train_unbalanced:.3f}")
         print(f"Precision on Validation Set = {precision_val:.3f}")
         print(f"Precision on Test Set = {precision_test:.3f}")
         print(f"Recall on Training Set = {recall_train:.3f}")
+        if X_train_unbalanced is not None: print(f"Recall on the original Training Set = {recall_train_unbalanced:.3f}")
         print(f"Recall on Validation Set = {recall_val:.3f}")
         print(f"Recall on Test Set = {recall_test:.3f}")
         print(f"F1 Score on Training Set = {f1_train:.3f}")
+        if X_train_unbalanced is not None: print(f"F1 Score on the original Training Set = {f1_train_unbalanced:.3f}")
         print(f"F1 Score on Validation Set = {f1_val:.3f}")
         print(f"F1 Score on Test Set = {f1_test:.3f}")
 
@@ -572,16 +608,23 @@ def train_baseline_model(site, model_type="mlp",
             "f1_val": f1_val,
             "f1_test": f1_test
         }
+    
+    if X_train_unbalanced is not None:
+        scores["precision_train_unbalanced"] = precision_train_unbalanced
+        scores["recall_train_unbalanced"] = recall_train_unbalanced
+        scores["f1_train_unbalanced"] = f1_train_unbalanced
+        
     if return_scores: 
         extra_info["scores"] = scores
     if return_scaler:
         extra_info["scaler"] = scaler
 
+
+
     if save_model:
         if save_folder is None:
             print("Could not save the model! save_folder must be provided if save_model is True.")
         else:
-            import joblib
             # package up the model and extra info
             # if scaler isnt returned save it anyway
             
@@ -676,15 +719,18 @@ def train_baseline_model_grid_search(site,
         data_kwargs (dict, optional): A dictionary where each key is a keyword
             argument accepted by :func:`get_train_test_data` and each value is a
             list of options to explore. All combinations of options are tried.
+            The special key ``sample_weights`` is also supported and controls
+            class weighting during model fitting (not data loading).
             For example::
 
                 {
                     "balance": [-1, 0.5],
                     "time_shift_hours": [[6], [6, 24]],
+                    "sample_weights": [None, "auto", 2.0],
                 }
 
             Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
-            and ``balance_method``. If None, defaults to
+            ``balance_method``, and ``sample_weights``. If None, defaults to
             ``{"balance": [-1], "time_shift_hours": [[6]]}``.
         validation_keys (list of str, optional): Keys from ``data_kwargs`` that
             should also be forwarded when loading the validation set. Only
@@ -722,6 +768,14 @@ def train_baseline_model_grid_search(site,
     if validation_keys is None:
         validation_keys = ["time_shift_hours"]
 
+    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights"}
+    unknown_keys = set(data_kwargs.keys()) - valid_data_kwargs
+    if unknown_keys:
+        raise ValueError(
+            f"Unknown data_kwargs keys: {sorted(unknown_keys)}. "
+            f"Valid keys are {sorted(valid_data_kwargs)}."
+        )
+
     # Build the cartesian product of all data-kwarg options
     keys = list(data_kwargs.keys())
     combos = list(itertools.product(*[data_kwargs[k] for k in keys]))
@@ -740,8 +794,11 @@ def train_baseline_model_grid_search(site,
         combo_kw = dict(zip(keys, combo))
         print(f"... data kwargs: {combo_kw}")
 
-        val_kw = {k: combo_kw[k] for k in validation_keys if k in combo_kw}
-        X_train, y_train = get_train_test_data(site, "train", **combo_kw)
+        sample_weight_setting = combo_kw.get("sample_weights", None)
+        data_loading_kw = {k: v for k, v in combo_kw.items() if k != "sample_weights"}
+
+        val_kw = {k: data_loading_kw[k] for k in validation_keys if k in data_loading_kw}
+        X_train, y_train = get_train_test_data(site, "train", **data_loading_kw)
         X_val, y_val = get_train_test_data(site, "validation", **val_kw)
 
         assert set(X_train.columns) == set(X_val.columns), "Feature columns in training and validation sets do not match. Check that the data kwargs affecting features are included in validation_keys."
@@ -765,7 +822,20 @@ def train_baseline_model_grid_search(site,
             )
 
         print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
-        grid_search.fit(X_all, y_all)
+        if sample_weight_setting is not None:
+            train_weights = generate_sample_weights(
+                y_train,
+                baseline_weight=sample_weight_setting,
+                non_baseline_weight=1.0,
+                verbose=False,
+            )
+            # Validation rows are not used for fitting in PredefinedSplit,
+            # but provide unit weights so sample_weight has full-length shape.
+            val_weights = pd.Series(np.ones(len(y_val), dtype=float), index=y_val.index)
+            sample_weight_all = pd.concat([train_weights, val_weights]).to_numpy()
+            grid_search.fit(X_all, y_all, sample_weight=sample_weight_all)
+        else:
+            grid_search.fit(X_all, y_all)
 
         print("Best parameters found: ", grid_search.best_params_)
         print("Best score: ", grid_search.best_score_)
@@ -786,11 +856,22 @@ def train_baseline_model_grid_search(site,
 
     # Train final model with the winning combination
     best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
-    X_train_final, y_train_final = get_train_test_data(site, "train", **best_combo_kw)
+    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k != "sample_weights"}
+    X_train_final, y_train_final = get_train_test_data(site, "train", **best_data_loading_kw)
     X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
 
     best_model = model.__class__(random_state=42, **best_best_params)
-    best_model.fit(X_train_final, y_train_final)
+    best_sample_weight_setting = best_combo_kw.get("sample_weights", None)
+    if best_sample_weight_setting is not None:
+        final_train_weights = generate_sample_weights(
+            y_train_final,
+            baseline_weight=best_sample_weight_setting,
+            non_baseline_weight=1.0,
+            verbose=False,
+        )
+        best_model.fit(X_train_final, y_train_final, sample_weight=final_train_weights)
+    else:
+        best_model.fit(X_train_final, y_train_final)
 
     # Evaluate on validation set
     pred_val = best_model.predict(X_val_final)
