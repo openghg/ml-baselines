@@ -529,8 +529,6 @@ def train_baseline_model(site, model_type="mlp",
     if return_scaler:
         extra_info["scaler"] = scaler
 
-
-
     if save_model:
         if save_folder is None:
             print("Could not save the model! save_folder must be provided if save_model is True.")
@@ -550,8 +548,11 @@ def train_baseline_model(site, model_type="mlp",
 
             joblib.dump(to_save, save_path)
             if verbose: print(f"Model saved to {save_path}")
-    
-    return model, X_train, y_train, extra_info
+
+    if not return_scores and not return_scaler:
+        return model, X_train, y_train
+    else:
+        return model, X_train, y_train, extra_info
 
 
 
