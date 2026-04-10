@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neural_network import MLPClassifier
 
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, get_scorer
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.preprocessing import StandardScaler
 
@@ -657,6 +657,7 @@ def train_baseline_model_grid_search(site,
         If ``return_cv_scores`` is True, a fourth element is returned:
         cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
+    print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
@@ -678,7 +679,7 @@ def train_baseline_model_grid_search(site,
     if validation_keys is None:
         validation_keys = ["time_shift_hours"]
 
-    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights"}
+    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights", "prediction_threshold"}
     unknown_keys = set(data_kwargs.keys()) - valid_data_kwargs
     if unknown_keys:
         raise ValueError(
@@ -700,12 +701,13 @@ def train_baseline_model_grid_search(site,
     else:
         refit = True
 
-    for combo in combos:
+    for i, combo in enumerate(combos, start=1):
         combo_kw = dict(zip(keys, combo))
-        print(f"... data kwargs: {combo_kw}")
+        print(f"\nRun {i}/{len(combos)} — data kwargs: {combo_kw}")
 
         sample_weight_setting = combo_kw.get("sample_weights", None)
-        data_loading_kw = {k: v for k, v in combo_kw.items() if k != "sample_weights"}
+        threshold = combo_kw.get("prediction_threshold", 0.5)
+        data_loading_kw = {k: v for k, v in combo_kw.items() if k not in ("sample_weights", "prediction_threshold")}
 
         val_kw = {k: data_loading_kw[k] for k in validation_keys if k in data_loading_kw}
         X_train, y_train = get_train_test_data(site, "train", **data_loading_kw)
@@ -731,7 +733,6 @@ def train_baseline_model_grid_search(site,
             return_train_score=return_cv_scores,
             )
 
-        print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
         if sample_weight_setting is not None:
             train_weights = generate_sample_weights(
                 y_train,
@@ -748,10 +749,17 @@ def train_baseline_model_grid_search(site,
             grid_search.fit(X_all, y_all)
 
         print("Best parameters found: ", grid_search.best_params_)
-        print("Best score: ", grid_search.best_score_)
+        print("Best score (default threshold): ", grid_search.best_score_)
+
+        # Apply custom threshold
+        metric_name = scoring[0] if isinstance(scoring, list) else scoring
+        scorer = get_scorer(metric_name)
+        y_pred_threshold = (grid_search.best_estimator_.predict_proba(X_val)[:, 1] >= threshold).astype(int)
+        threshold_score = scorer._score_func(y_val, y_pred_threshold)
+        print("Threshold-adjusted score:", threshold_score)
 
         best_params_list.append(grid_search.best_params_)
-        best_scores_list.append(grid_search.best_score_)
+        best_scores_list.append(threshold_score)
         best_data_kwargs_list.append(combo_kw)
         if return_cv_scores:
             cv_results[str(combo_kw)] = pd.DataFrame(grid_search.cv_results_)
@@ -784,7 +792,8 @@ def train_baseline_model_grid_search(site,
         best_model.fit(X_train_final, y_train_final)
 
     # Evaluate on validation set
-    pred_val = best_model.predict(X_val_final)
+    best_threshold = best_combo_kw.get("prediction_threshold", 0.5)
+    pred_val = (best_model.predict_proba(X_val_final)[:, 1] >= best_threshold).astype(int)
 
     precision_val = precision_score(y_val_final, pred_val)
     recall_val = recall_score(y_val_final, pred_val)
