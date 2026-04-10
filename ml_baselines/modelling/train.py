@@ -90,12 +90,11 @@ def get_train_test_data(site, test_train,
 
     # if its test mode, make sure that there is no overlap with training and val, and if so remove from df
     if test_train == "test":
-        if verbose: print("")
         train_period = periods_dict["train"]
         val_period = periods_dict["validation"]
         # first, let's check if there is overlap between either training or validation period and the test period, and if so print a warning
         if ((val_period[0] <= end_year) and (val_period[1] >= start_year)) or ((train_period[0] <= end_year) and (train_period[1] >= start_year)):
-            if verbose: print(f"Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
+            if verbose: print(f"    Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
             df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
             df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
 
@@ -378,7 +377,7 @@ def train_baseline_model(site, model_type="mlp",
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
     if balance > 0 or undersample > 0:
-        X_train_unbalanced, y_train_unbalanced = get_train_test_data(site, "train", balance=-1, balance_method=balance_method, time_shift_hours=time_shift_hours, undersample=0, verbose=verbose)
+        X_train_unbalanced, y_train_unbalanced = get_train_test_data(site, "train", balance=-1, balance_method=balance_method, time_shift_hours=time_shift_hours, undersample=0, verbose=False)
     else:
         X_train_unbalanced, y_train_unbalanced = None, None
 
@@ -389,7 +388,7 @@ def train_baseline_model(site, model_type="mlp",
 
     if verbose:
         print(f"Number of training points: {len(y_train)}")
-        print(f"... number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
+        print(f"Number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
 
     # If non-specified, use default hyperparameters
     if model_params is None:
@@ -529,8 +528,6 @@ def train_baseline_model(site, model_type="mlp",
     if return_scaler:
         extra_info["scaler"] = scaler
 
-
-
     if save_model:
         if save_folder is None:
             print("Could not save the model! save_folder must be provided if save_model is True.")
@@ -551,7 +548,10 @@ def train_baseline_model(site, model_type="mlp",
             joblib.dump(to_save, save_path)
             if verbose: print(f"Model saved to {save_path}")
     
-    return model, X_train, y_train, extra_info
+    if not return_scores and not return_scaler:
+        return model, X_train, y_train
+    else:
+        return model, X_train, y_train, extra_info
 
 
 
