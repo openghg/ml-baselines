@@ -774,7 +774,7 @@ def train_baseline_model_grid_search(site,
 
     # Train final model with the winning combination
     best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
-    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k != "sample_weights"}
+    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k not in ("sample_weights", "prediction_threshold")}
     X_train_final, y_train_final = get_train_test_data(site, "train", **best_data_loading_kw)
     X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
 
