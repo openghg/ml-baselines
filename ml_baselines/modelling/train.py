@@ -608,8 +608,9 @@ def train_baseline_model_grid_search(site,
                           scoring="f1",
                           param_grid=None,
                           data_kwargs=None,
+                          prediction_thresholds=[0.5],
                           validation_keys=None,
-                          return_cv_scores=False, 
+                          return_cv_scores=False,
                           save_cv_scores=False,
                           save_cv_scores_folder=cfg.models_path,
                           save_suffix=None):
@@ -620,9 +621,9 @@ def train_baseline_model_grid_search(site,
 
     Args:
         site (str): The site for which to train the model.
-        model_type (str): The type of model to train. Currently accepts "mlp", 
+        model_type (str): The type of model to train. Currently accepts "mlp",
             "random_forest", or "gradient_boosting". Note that the param_grid
-            needs to be appropriate for the chosen model type. 
+            needs to be appropriate for the chosen model type.
         scoring (str or list): Metrics to evaluate during grid search. Can be a single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]). If a list is provided, the first metric will be used for selecting the best model (refit), and scores for all metrics will be returned in cv_results if return_cv_scores is True.
         param_grid (dict, optional): A dictionary containing model
             hyperparameters to tune. If None, default values are used.
@@ -642,6 +643,15 @@ def train_baseline_model_grid_search(site,
             Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
             ``balance_method``, and ``sample_weights``. If None, defaults to
             ``{"balance": [-1], "time_shift_hours": [[6]]}``.
+        prediction_thresholds (list of float, optional): Prediction thresholds to
+            evaluate after the grid search. For each data-kwarg combo, the grid
+            search is run once (at the default 0.5 threshold); the best model
+            found is then re-evaluated at every threshold in this list. The
+            global winner is the ``(combo, threshold)`` pair with the highest
+            primary-metric score. In ``cv_results``, all parameter sets carry
+            ``prediction_threshold = 0.5`` from the grid search; extra rows are
+            appended for the best model in each combo at every other threshold.
+            Defaults to ``[0.5]``.
         validation_keys (list of str, optional): Keys from ``data_kwargs`` that
             should also be forwarded when loading the validation set. Only
             keywords that affect the feature representation (e.g.
@@ -651,10 +661,11 @@ def train_baseline_model_grid_search(site,
         return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
         save_cv_scores_folder (str, optional): The folder where to save the grid search results as a csv from the pandas dataset, if return_cv_scores is True. If None, the results will not be saved to a csv.
     Returns:
-        tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
-            model, the winning hyperparameter dict, and the winning data-kwargs dict.
+        tuple: ``(best_model, best_params, best_data_kwargs, best_threshold)`` — the fitted
+            model, the winning hyperparameter dict, the winning data-kwargs dict, and the
+            winning prediction threshold.
 
-        If ``return_cv_scores`` is True, a fourth element is returned:
+        If ``return_cv_scores`` is True, a fifth element is returned:
         cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
     print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
@@ -679,7 +690,10 @@ def train_baseline_model_grid_search(site,
     if validation_keys is None:
         validation_keys = ["time_shift_hours"]
 
-    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights", "prediction_threshold"}
+    if 0.5 not in prediction_thresholds:
+        prediction_thresholds = [0.5] + prediction_thresholds
+
+    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights"}
     unknown_keys = set(data_kwargs.keys()) - valid_data_kwargs
     if unknown_keys:
         raise ValueError(
@@ -694,20 +708,24 @@ def train_baseline_model_grid_search(site,
     best_params_list = []
     best_scores_list = []
     best_data_kwargs_list = []
-    cv_results = {} 
-    
+    best_thresholds_list = []
+    cv_results = {}
+
     if type(scoring) == list:
         refit = scoring[0]
     else:
         refit = True
+
+    primary_metric = scoring[0] if isinstance(scoring, list) else scoring
+    primary_scorer = get_scorer(primary_metric)
+    scorers = {m: get_scorer(m) for m in (scoring if isinstance(scoring, list) else [scoring])}
 
     for i, combo in enumerate(combos, start=1):
         combo_kw = dict(zip(keys, combo))
         print(f"\nRun {i}/{len(combos)} — data kwargs: {combo_kw}")
 
         sample_weight_setting = combo_kw.get("sample_weights", None)
-        threshold = combo_kw.get("prediction_threshold", 0.5)
-        data_loading_kw = {k: v for k, v in combo_kw.items() if k not in ("sample_weights", "prediction_threshold")}
+        data_loading_kw = {k: v for k, v in combo_kw.items() if k != "sample_weights"}
 
         val_kw = {k: data_loading_kw[k] for k in validation_keys if k in data_loading_kw}
         X_train, y_train = get_train_test_data(site, "train", **data_loading_kw)
@@ -749,32 +767,54 @@ def train_baseline_model_grid_search(site,
             grid_search.fit(X_all, y_all)
 
         print("Best parameters found: ", grid_search.best_params_)
-        print("Best score (default threshold): ", grid_search.best_score_)
+        print("Best score (default threshold 0.5): ", grid_search.best_score_)
 
-        # Apply custom threshold
-        metric_name = scoring[0] if isinstance(scoring, list) else scoring
-        scorer = get_scorer(metric_name)
-        y_pred_threshold = (grid_search.best_estimator_.predict_proba(X_val)[:, 1] >= threshold).astype(int)
-        threshold_score = scorer._score_func(y_val, y_pred_threshold)
-        print("Threshold-adjusted score:", threshold_score)
+        # Evaluate the best model at each prediction threshold (grid search used 0.5 implicitly)
+        val_proba = grid_search.best_estimator_.predict_proba(X_val)[:, 1]
+        for threshold in prediction_thresholds:
+            y_pred = (val_proba >= threshold).astype(int)
+            threshold_score = primary_scorer._score_func(y_val, y_pred)
+            print(f"  Threshold {threshold:.2f}: {primary_metric} = {threshold_score:.3f}")
+            best_params_list.append(grid_search.best_params_)
+            best_scores_list.append(threshold_score)
+            best_data_kwargs_list.append(combo_kw)
+            best_thresholds_list.append(threshold)
 
-        best_params_list.append(grid_search.best_params_)
-        best_scores_list.append(threshold_score)
-        best_data_kwargs_list.append(combo_kw)
         if return_cv_scores:
-            cv_results[str(combo_kw)] = pd.DataFrame(grid_search.cv_results_)
+            cv_df = pd.DataFrame(grid_search.cv_results_)
+            cv_df["prediction_threshold"] = 0.5
 
-    # Find the best combination across all data-kwarg combos
+            # Append extra rows for the best model at each threshold != 0.5
+            extra_thresholds = [t for t in prediction_thresholds if t != 0.5]
+            if extra_thresholds:
+                rank_col = f"rank_test_{primary_metric}" if isinstance(scoring, list) else "rank_test_score"
+                best_row = cv_df[cv_df[rank_col] == 1].iloc[[0]].copy()
+                extra_rows = []
+                for threshold in extra_thresholds:
+                    y_pred = (val_proba >= threshold).astype(int)
+                    row = best_row.copy()
+                    row["prediction_threshold"] = threshold
+                    for m, s in scorers.items():
+                        col = f"mean_test_{m}" if isinstance(scoring, list) else "mean_test_score"
+                        row[col] = s._score_func(y_val, y_pred)
+                    extra_rows.append(row)
+                cv_df = pd.concat([cv_df] + extra_rows, ignore_index=True)
+
+            cv_results[str(combo_kw)] = cv_df
+
+    # Find the best combination across all data-kwarg combos and thresholds
     best_index = best_scores_list.index(max(best_scores_list))
     best_best_params = best_params_list[best_index]
     best_combo_kw = best_data_kwargs_list[best_index]
+    best_threshold = best_thresholds_list[best_index]
 
     print(f"\nBest data kwargs: {best_combo_kw}")
+    print(f"Best threshold: {best_threshold}")
     print(f"Best {model_type.upper() if model_type == 'mlp' else model_type} parameters: {best_best_params}")
 
     # Train final model with the winning combination
     best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
-    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k not in ("sample_weights", "prediction_threshold")}
+    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k != "sample_weights"}
     X_train_final, y_train_final = get_train_test_data(site, "train", **best_data_loading_kw)
     X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
 
@@ -791,8 +831,7 @@ def train_baseline_model_grid_search(site,
     else:
         best_model.fit(X_train_final, y_train_final)
 
-    # Evaluate on validation set
-    best_threshold = best_combo_kw.get("prediction_threshold", 0.5)
+    # Evaluate on validation set with the winning threshold
     pred_val = (best_model.predict_proba(X_val_final)[:, 1] >= best_threshold).astype(int)
 
     precision_val = precision_score(y_val_final, pred_val)
@@ -817,12 +856,14 @@ def train_baseline_model_grid_search(site,
         if save_cv_scores:
             if save_cv_scores_folder is not None:
                 save_filename = f"cv_results_{site}_{model_type}_{save_suffix}.csv" if save_suffix is not None else f"cv_results_{site}_{model_type}.csv"
-                save_path = Path(save_cv_scores_folder) / site 
+                save_path = Path(save_cv_scores_folder) / site
                 save_path.mkdir(parents=True, exist_ok=True)
                 all_cv_results.to_csv(save_path / save_filename, index=False)
                 print(f"CV scores saved to {save_path / save_filename}")
             else:
                 print("Could not save CV scores! save_cv_scores_folder must be provided if save_cv_scores is True.")
+
+        best_combo_kw["prediction_threshold"] = best_threshold
 
         return best_model, best_best_params, best_combo_kw, all_cv_results
     else:
