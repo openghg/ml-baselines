@@ -659,7 +659,9 @@ def train_baseline_model_grid_search(site,
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
         return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
+        save_cv_scores (bool): Whether to save the grid search results, if return_cv_scores is True
         save_cv_scores_folder (str, optional): The folder where to save the grid search results as a csv from the pandas dataset, if return_cv_scores is True. If None, the results will not be saved to a csv.
+        save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
     Returns:
         tuple: ``(best_model, best_params, best_data_kwargs, best_threshold)`` — the fitted
             model, the winning hyperparameter dict, the winning data-kwargs dict, and the
@@ -669,6 +671,10 @@ def train_baseline_model_grid_search(site,
         cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
     print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
+
+    if save_cv_scores and not return_cv_scores:
+       print("Warning: save_cv_scores=True requires return_cv_scores. Setting return_cv_scores=True.")
+       return_cv_scores = True
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
