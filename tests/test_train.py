@@ -27,8 +27,9 @@ class DummyClassifier:
         return self
 
     def predict_proba(self, X):
-        positive_probability = np.full(len(X), 0.8)
-        return np.column_stack([1.0 - positive_probability, positive_probability])
+        positive_probability = 0.8 if self.fit_sample_weight is not None else 0.4
+        pos = np.full(len(X), positive_probability)
+        return np.column_stack([1.0 - pos, pos])
 
     def predict(self, X):
         return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
@@ -71,6 +72,10 @@ class DummyGridSearchCV:
             "rank_test_score": np.array([1]),
             "params": [self.best_params_],
         }
+        fitted = DummyClassifier(**self.estimator.kwargs)
+        fitted.fit(X, y, sample_weight=sample_weight)
+        self.best_estimator_ = fitted
+
         return self
 
 
