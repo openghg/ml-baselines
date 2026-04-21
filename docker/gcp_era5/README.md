@@ -31,17 +31,24 @@ Set up GCP Cloud Run **Job** using appropriate resources (X Gb).
 
 Run using:
 
+```
 gcloud run jobs execute gcp-era5 --region=us-central1 --args='MHD,1978'
+```
 
 Or in a loop:
 
-for year in {1979..2024}; do
-   gcloud run jobs execute gcp-era5 --region=us-central1 --args='MHD,'"$year"
-done
+```
+for y in {2009..2010}; do gcloud run jobs execute gcp-era5 --region=us-central1 --args="THD,$y"; done
+```
 
+It takes a few seconds to provision each job, so you can submit them in parallel, if needed. The ```sleep``` command is there to prevent request limits being reached (although, it still seems easy to reach them, for reasons that I haven't investigated):
+
+```
+for y in {2009..2010}; do gcloud run jobs execute gcp-era5 --region=us-central1 --async --args="THD,$y"; sleep 0.5;  done
+```
 
 ### Downloading the data from the bucket
 
-To download the data from the bucket, you can use the gsutil command:
+To download the data from the bucket, you can use:
 
-```gsutil -m cp gs://ml-baselines-era5/* /local/path/to/store/data/```
+```gcloud storage rsync gs://<BUCKET_NAME>/ /LOCAL/PATH/```
