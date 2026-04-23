@@ -2,6 +2,7 @@ import itertools
 from pathlib import Path
 from datetime import datetime
 import joblib
+import time
 
 import numpy as np
 import pandas as pd
@@ -427,11 +428,14 @@ def train_baseline_model(site, model_type="mlp",
         scaler = None
 
     # Fit the model
+    start_time = time.time()
     if verbose: print("... fitting")
     if sample_weights is not None:
         model.fit(X_train, y_train, sample_weight=weights)
     else:
         model.fit(X_train, y_train)
+    fit_time = time.time() - start_time
+    print(f"Fit time: {fit_time:.1f}s")
 
     # Make predictions
     if verbose: print("... predicting")
