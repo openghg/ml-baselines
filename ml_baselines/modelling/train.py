@@ -795,8 +795,8 @@ def train_baseline_model_grid_search(site,
         for threshold in prediction_thresholds:
             y_pred_train = (train_proba >= threshold).astype(int)
             train_score = primary_scorer._score_func(y_train, y_pred_train)
-            if train_score == 1.0:
-                print(f"  Skipping threshold {threshold:.2f}. Training score = 1.000, likely overfitting.")
+            if train_score >= 0.99:
+                print(f"  Skipping threshold {threshold:.2f}. Training score indicates likely overfitting.")
                 continue
             y_pred = (val_proba >= threshold).astype(int)
             threshold_score = primary_scorer._score_func(y_val, y_pred)
