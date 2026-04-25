@@ -789,8 +789,15 @@ def train_baseline_model_grid_search(site,
         print("Best score (default threshold 0.5): ", grid_search.best_score_)
 
         # Evaluate the best model at each prediction threshold (grid search used 0.5 implicitly)
+        train_proba = grid_search.best_estimator_.predict_proba(X_train)[:, 1]
         val_proba = grid_search.best_estimator_.predict_proba(X_val)[:, 1]
+
         for threshold in prediction_thresholds:
+            y_pred_train = (train_proba >= threshold).astype(int)
+            train_score = primary_scorer._score_func(y_train, y_pred_train)
+            if train_score == 1.0:
+                print(f"  Skipping threshold {threshold:.2f}. Training score = 1.000, likely overfitting.")
+                continue
             y_pred = (val_proba >= threshold).astype(int)
             threshold_score = primary_scorer._score_func(y_val, y_pred)
             print(f"  Threshold {threshold:.2f}: {primary_metric} = {threshold_score:.3f}")
@@ -822,6 +829,8 @@ def train_baseline_model_grid_search(site,
             cv_results[str(combo_kw)] = cv_df
 
     # Find the best combination across all data-kwarg combos and thresholds
+    if not best_scores_list:
+        raise ValueError("All combinations skipped due to overfitting. Consider expanding param_grid or data_kwargs.")
     best_index = best_scores_list.index(max(best_scores_list))
     best_best_params = best_params_list[best_index]
     best_combo_kw = best_data_kwargs_list[best_index]
