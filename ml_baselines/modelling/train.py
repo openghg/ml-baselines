@@ -2,6 +2,7 @@ import itertools
 from pathlib import Path
 from datetime import datetime
 import joblib
+import time
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neural_network import MLPClassifier
 
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, get_scorer
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
 from sklearn.preprocessing import StandardScaler
 
@@ -90,12 +91,11 @@ def get_train_test_data(site, test_train,
 
     # if its test mode, make sure that there is no overlap with training and val, and if so remove from df
     if test_train == "test":
-        if verbose: print("")
         train_period = periods_dict["train"]
         val_period = periods_dict["validation"]
         # first, let's check if there is overlap between either training or validation period and the test period, and if so print a warning
         if ((val_period[0] <= end_year) and (val_period[1] >= start_year)) or ((train_period[0] <= end_year) and (train_period[1] >= start_year)):
-            if verbose: print(f"Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
+            if verbose: print(f"    Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
             df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
             df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
 
@@ -378,7 +378,7 @@ def train_baseline_model(site, model_type="mlp",
                                time_shift_hours=time_shift_hours, undersample=undersample, verbose=verbose)
     
     if balance > 0 or undersample > 0:
-        X_train_unbalanced, y_train_unbalanced = get_train_test_data(site, "train", balance=-1, balance_method=balance_method, time_shift_hours=time_shift_hours, undersample=0, verbose=verbose)
+        X_train_unbalanced, y_train_unbalanced = get_train_test_data(site, "train", balance=-1, balance_method=balance_method, time_shift_hours=time_shift_hours, undersample=0, verbose=False)
     else:
         X_train_unbalanced, y_train_unbalanced = None, None
 
@@ -389,7 +389,7 @@ def train_baseline_model(site, model_type="mlp",
 
     if verbose:
         print(f"Number of training points: {len(y_train)}")
-        print(f"... number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
+        print(f"Number of baseline points: {sum(y_train == 1)} ({sum(y_train == 1) / len(y_train):.1%})")
 
     # If non-specified, use default hyperparameters
     if model_params is None:
@@ -428,11 +428,14 @@ def train_baseline_model(site, model_type="mlp",
         scaler = None
 
     # Fit the model
+    start_time = time.time()
     if verbose: print("... fitting")
     if sample_weights is not None:
         model.fit(X_train, y_train, sample_weight=weights)
     else:
         model.fit(X_train, y_train)
+    fit_time = time.time() - start_time
+    print(f"Fit time: {fit_time:.1f}s")
 
     # Make predictions
     if verbose: print("... predicting")
@@ -549,10 +552,7 @@ def train_baseline_model(site, model_type="mlp",
             joblib.dump(to_save, save_path)
             if verbose: print(f"Model saved to {save_path}")
 
-    if not return_scores and not return_scaler:
-        return model, X_train, y_train
-    else:
-        return model, X_train, y_train, extra_info
+    return model, X_train, y_train, extra_info
 
 
 
@@ -609,8 +609,9 @@ def train_baseline_model_grid_search(site,
                           scoring="f1",
                           param_grid=None,
                           data_kwargs=None,
+                          prediction_thresholds=[0.5],
                           validation_keys=None,
-                          return_cv_scores=False, 
+                          return_cv_scores=False,
                           save_cv_scores=False,
                           save_cv_scores_folder=cfg.models_path,
                           save_suffix=None):
@@ -621,28 +622,42 @@ def train_baseline_model_grid_search(site,
 
     Args:
         site (str): The site for which to train the model.
-        model_type (str): The type of model to train. Currently accepts "mlp", 
+        model_type (str): The type of model to train. Currently accepts "mlp",
             "random_forest", or "gradient_boosting". Note that the param_grid
-            needs to be appropriate for the chosen model type. 
-        scoring (str or list): Metrics to evaluate during grid search. Can be a single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]). If a list is provided, the first metric will be used for selecting the best model (refit), and scores for all metrics will be returned in cv_results if return_cv_scores is True.
+            needs to be appropriate for the chosen model type.
+        scoring (str or list): Metrics to evaluate during grid search. Can be a
+            single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]).
+            If a list is provided, the first metric will be used for selecting the best model (refit),
+            and scores for all metrics will be returned in cv_results if return_cv_scores is True.
         param_grid (dict, optional): A dictionary containing model
             hyperparameters to tune. If None, default values are used.
         data_kwargs (dict, optional): A dictionary where each key is a keyword
             argument accepted by :func:`get_train_test_data` and each value is a
             list of options to explore. All combinations of options are tried.
-            The special key ``sample_weights`` is also supported and controls
-            class weighting during model fitting (not data loading).
+            The special keys ``sample_weights`` and ``normalise_inputs`` are also supported.
+            ``sample_weights`` controls class weighting during model fitting (not data loading),
+            and ``normalise_inputs`` fits a scaler on train data and applies to the validation set.
             For example::
 
                 {
                     "balance": [-1, 0.5],
                     "time_shift_hours": [[6], [6, 24]],
                     "sample_weights": [None, "auto", 2.0],
+                    "normalise_inputs": [True, False],
                 }
 
             Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
-            ``balance_method``, and ``sample_weights``. If None, defaults to
-            ``{"balance": [-1], "time_shift_hours": [[6]]}``.
+            ``balance_method``, ``sample_weights`` and ``normalise_inputs``. If None, defaults to
+            ``{"balance": [-1], "time_shift_hours": [[6]], "normalise_inputs": [False]}``.
+        prediction_thresholds (list of float, optional): Prediction thresholds to
+            evaluate after the grid search. For each data-kwarg combo, the grid
+            search is run once (at the default 0.5 threshold); the best model
+            found is then re-evaluated at every threshold in this list. The
+            global winner is the ``(combo, threshold)`` pair with the highest
+            primary-metric score. In ``cv_results``, all parameter sets carry
+            ``prediction_threshold = 0.5`` from the grid search; extra rows are
+            appended for the best model in each combo at every other threshold.
+            Defaults to ``[0.5]``.
         validation_keys (list of str, optional): Keys from ``data_kwargs`` that
             should also be forwarded when loading the validation set. Only
             keywords that affect the feature representation (e.g.
@@ -650,14 +665,22 @@ def train_baseline_model_grid_search(site,
             options such as ``"balance"`` or ``"undersample"`` should be
             omitted. If None, defaults to ``["time_shift_hours"]``.
         return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
+        save_cv_scores (bool): Whether to save the grid search results, if return_cv_scores is True
         save_cv_scores_folder (str, optional): The folder where to save the grid search results as a csv from the pandas dataset, if return_cv_scores is True. If None, the results will not be saved to a csv.
+        save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
     Returns:
-        tuple: ``(best_model, best_params, best_data_kwargs)`` — the fitted
-            model, the winning hyperparameter dict, and the winning data-kwargs dict.
+        tuple: ``(best_model, best_scaler, best_params, best_data_kwargs, best_threshold)`` — the fitted
+            model, an ``InputPerVariableScaler`` fitted on the winning training data (or ``None`` if ``normalise_inputs`` is False in the winning data-kwargs dict),
+            the winning hyperparameter dict, the winning data-kwargs dict, and the winning prediction threshold.
 
-        If ``return_cv_scores`` is True, a fourth element is returned:
+        If ``return_cv_scores`` is True, a fifth element is returned:
         cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
+    print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
+
+    if save_cv_scores and not return_cv_scores:
+       print("Warning: save_cv_scores=True requires return_cv_scores. Setting return_cv_scores=True.")
+       return_cv_scores = True
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
     if model_type not in valid_model_types:
@@ -674,12 +697,16 @@ def train_baseline_model_grid_search(site,
 
     if data_kwargs is None:
         data_kwargs = {"balance": [-1],
-                       "time_shift_hours": [[6]]}
+                       "time_shift_hours": [[6]],
+                       "normalise_inputs": [False]}
 
     if validation_keys is None:
         validation_keys = ["time_shift_hours"]
 
-    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights"}
+    if 0.5 not in prediction_thresholds:
+        prediction_thresholds = [0.5] + prediction_thresholds
+
+    valid_data_kwargs = {"balance", "undersample", "time_shift_hours", "balance_method", "sample_weights", "normalise_inputs"}
     unknown_keys = set(data_kwargs.keys()) - valid_data_kwargs
     if unknown_keys:
         raise ValueError(
@@ -694,23 +721,34 @@ def train_baseline_model_grid_search(site,
     best_params_list = []
     best_scores_list = []
     best_data_kwargs_list = []
-    cv_results = {} 
-    
+    best_thresholds_list = []
+    cv_results = {}
+
     if type(scoring) == list:
         refit = scoring[0]
     else:
         refit = True
 
-    for combo in combos:
+    primary_metric = scoring[0] if isinstance(scoring, list) else scoring
+    primary_scorer = get_scorer(primary_metric)
+    scorers = {m: get_scorer(m) for m in (scoring if isinstance(scoring, list) else [scoring])}
+
+    for i, combo in enumerate(combos, start=1):
         combo_kw = dict(zip(keys, combo))
-        print(f"... data kwargs: {combo_kw}")
+        print(f"\nRun {i}/{len(combos)} — data kwargs: {combo_kw}")
 
         sample_weight_setting = combo_kw.get("sample_weights", None)
-        data_loading_kw = {k: v for k, v in combo_kw.items() if k != "sample_weights"}
+        normalise_inputs_setting = combo_kw.get("normalise_inputs", False)
+        data_loading_kw = {k: v for k, v in combo_kw.items() if k not in ("sample_weights", "normalise_inputs")}
 
         val_kw = {k: data_loading_kw[k] for k in validation_keys if k in data_loading_kw}
         X_train, y_train = get_train_test_data(site, "train", **data_loading_kw)
         X_val, y_val = get_train_test_data(site, "validation", **val_kw)
+
+        if normalise_inputs_setting:
+            scaler = InputPerVariableScaler()
+            X_train = scaler.fit_transform(X_train)
+            X_val = scaler.transform(X_val)
 
         assert set(X_train.columns) == set(X_val.columns), "Feature columns in training and validation sets do not match. Check that the data kwargs affecting features are included in validation_keys."
 
@@ -732,7 +770,6 @@ def train_baseline_model_grid_search(site,
             return_train_score=return_cv_scores,
             )
 
-        print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site} with grid search...")
         if sample_weight_setting is not None:
             train_weights = generate_sample_weights(
                 y_train,
@@ -749,27 +786,63 @@ def train_baseline_model_grid_search(site,
             grid_search.fit(X_all, y_all)
 
         print("Best parameters found: ", grid_search.best_params_)
-        print("Best score: ", grid_search.best_score_)
+        print("Best score (default threshold 0.5): ", grid_search.best_score_)
 
-        best_params_list.append(grid_search.best_params_)
-        best_scores_list.append(grid_search.best_score_)
-        best_data_kwargs_list.append(combo_kw)
+        # Evaluate the best model at each prediction threshold (grid search used 0.5 implicitly)
+        val_proba = grid_search.best_estimator_.predict_proba(X_val)[:, 1]
+        for threshold in prediction_thresholds:
+            y_pred = (val_proba >= threshold).astype(int)
+            threshold_score = primary_scorer._score_func(y_val, y_pred)
+            print(f"  Threshold {threshold:.2f}: {primary_metric} = {threshold_score:.3f}")
+            best_params_list.append(grid_search.best_params_)
+            best_scores_list.append(threshold_score)
+            best_data_kwargs_list.append(combo_kw)
+            best_thresholds_list.append(threshold)
+
         if return_cv_scores:
-            cv_results[str(combo_kw)] = pd.DataFrame(grid_search.cv_results_)
+            cv_df = pd.DataFrame(grid_search.cv_results_)
+            cv_df["prediction_threshold"] = 0.5
 
-    # Find the best combination across all data-kwarg combos
+            # Append extra rows for the best model at each threshold != 0.5
+            extra_thresholds = [t for t in prediction_thresholds if t != 0.5]
+            if extra_thresholds:
+                rank_col = f"rank_test_{primary_metric}" if isinstance(scoring, list) else "rank_test_score"
+                best_row = cv_df[cv_df[rank_col] == 1].iloc[[0]].copy()
+                extra_rows = []
+                for threshold in extra_thresholds:
+                    y_pred = (val_proba >= threshold).astype(int)
+                    row = best_row.copy()
+                    row["prediction_threshold"] = threshold
+                    for m, s in scorers.items():
+                        col = f"mean_test_{m}" if isinstance(scoring, list) else "mean_test_score"
+                        row[col] = s._score_func(y_val, y_pred)
+                    extra_rows.append(row)
+                cv_df = pd.concat([cv_df] + extra_rows, ignore_index=True)
+
+            cv_results[str(combo_kw)] = cv_df
+
+    # Find the best combination across all data-kwarg combos and thresholds
     best_index = best_scores_list.index(max(best_scores_list))
     best_best_params = best_params_list[best_index]
     best_combo_kw = best_data_kwargs_list[best_index]
+    best_threshold = best_thresholds_list[best_index]
 
     print(f"\nBest data kwargs: {best_combo_kw}")
+    print(f"Best threshold: {best_threshold}")
     print(f"Best {model_type.upper() if model_type == 'mlp' else model_type} parameters: {best_best_params}")
 
     # Train final model with the winning combination
     best_val_kw = {k: best_combo_kw[k] for k in validation_keys if k in best_combo_kw}
-    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k != "sample_weights"}
+    best_data_loading_kw = {k: v for k, v in best_combo_kw.items() if k not in ("sample_weights", "normalise_inputs")}
     X_train_final, y_train_final = get_train_test_data(site, "train", **best_data_loading_kw)
     X_val_final, y_val_final = get_train_test_data(site, "validation", **best_val_kw)
+
+    best_normalise_setting = best_combo_kw.get("normalise_inputs", False)
+    best_scaler = None
+    if best_normalise_setting:
+        best_scaler = InputPerVariableScaler()
+        X_train_final = best_scaler.fit_transform(X_train_final)
+        X_val_final = best_scaler.transform(X_val_final)
 
     best_model = model.__class__(random_state=42, **best_best_params)
     best_sample_weight_setting = best_combo_kw.get("sample_weights", None)
@@ -784,8 +857,8 @@ def train_baseline_model_grid_search(site,
     else:
         best_model.fit(X_train_final, y_train_final)
 
-    # Evaluate on validation set
-    pred_val = best_model.predict(X_val_final)
+    # Evaluate on validation set with the winning threshold
+    pred_val = (best_model.predict_proba(X_val_final)[:, 1] >= best_threshold).astype(int)
 
     precision_val = precision_score(y_val_final, pred_val)
     recall_val = recall_score(y_val_final, pred_val)
@@ -809,13 +882,15 @@ def train_baseline_model_grid_search(site,
         if save_cv_scores:
             if save_cv_scores_folder is not None:
                 save_filename = f"cv_results_{site}_{model_type}_{save_suffix}.csv" if save_suffix is not None else f"cv_results_{site}_{model_type}.csv"
-                save_path = Path(save_cv_scores_folder) / site 
+                save_path = Path(save_cv_scores_folder) / site
                 save_path.mkdir(parents=True, exist_ok=True)
                 all_cv_results.to_csv(save_path / save_filename, index=False)
                 print(f"CV scores saved to {save_path / save_filename}")
             else:
                 print("Could not save CV scores! save_cv_scores_folder must be provided if save_cv_scores is True.")
 
-        return best_model, best_best_params, best_combo_kw, all_cv_results
+        best_combo_kw["prediction_threshold"] = best_threshold
+
+        return best_model, best_scaler, best_best_params, best_combo_kw, all_cv_results
     else:
-        return best_model, best_best_params, best_combo_kw
+        return best_model, best_scaler, best_best_params, best_combo_kw
