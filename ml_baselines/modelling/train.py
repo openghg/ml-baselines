@@ -26,7 +26,7 @@ models_path = cfg.models_path
 def get_train_test_data(site, test_train,
                         balance=-1,
                         undersample=0,
-                        time_shift_hours=[6],
+                        time_shift_hours=[6, 12, 18, 24],
                         return_dataframe=False,
                         balance_method="random", verbose=True):
     """ Get the training, testing or validation data for a given site.
@@ -343,7 +343,7 @@ def train_baseline_model(site, model_type="mlp",
             undersample=0,
             sample_weights=None,
             normalise_inputs=False,
-            time_shift_hours=[6], prediction_threshold=0.5,
+            time_shift_hours=[6, 12, 18, 24], prediction_threshold=0.5,
             model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path, save_suffix=None, evaluate_on_test=True, random_seed=42):
     """ Train a model to classify baseline events for a given site.
 
@@ -641,14 +641,14 @@ def train_baseline_model_grid_search(site,
 
                 {
                     "balance": [-1, 0.5],
-                    "time_shift_hours": [[6], [6, 24]],
+                    "time_shift_hours": [[6, 12, 18, 24], [6, 24]],
                     "sample_weights": [None, "auto", 2.0],
                     "normalise_inputs": [True, False],
                 }
 
             Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
             ``balance_method``, ``sample_weights`` and ``normalise_inputs``. If None, defaults to
-            ``{"balance": [-1], "time_shift_hours": [[6]], "normalise_inputs": [False]}``.
+            ``{"balance": [-1], "time_shift_hours": [[6, 12, 18, 24]], "normalise_inputs": [False]}``.
         prediction_thresholds (list of float, optional): Prediction thresholds to
             evaluate after the grid search. For each data-kwarg combo, the grid
             search is run once (at the default 0.5 threshold); the best model
@@ -697,7 +697,7 @@ def train_baseline_model_grid_search(site,
 
     if data_kwargs is None:
         data_kwargs = {"balance": [-1],
-                       "time_shift_hours": [[6]],
+                       "time_shift_hours": [[6, 12, 18, 24]],
                        "normalise_inputs": [False]}
 
     if validation_keys is None:

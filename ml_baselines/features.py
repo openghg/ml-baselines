@@ -333,7 +333,7 @@ def preprocess_all_features_arco_era5(force=False):
 def open_features(site,
                 start_year=1978,
                 end_year=2024,
-                time_shift_hours=[6],
+                time_shift_hours=[6, 12, 18, 24],
                 features_dir=""):
     """Opens the preprocessed features for a given site.
 

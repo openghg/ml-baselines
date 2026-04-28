@@ -41,7 +41,7 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
     print(f"Loaded model from {model_file[-1]}")
     return model_dict['model'], model_dict['info']
 
-def predict_baselines(site, model, time_shift_hours=[6], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
+def predict_baselines(site, model, time_shift_hours=[6, 12, 18, 24], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
     """
     Predict baseline events for a given site using a trained model.
 
