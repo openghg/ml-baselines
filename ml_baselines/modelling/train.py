@@ -435,7 +435,7 @@ def train_baseline_model(site, model_type="mlp",
     else:
         model.fit(X_train, y_train)
     fit_time = time.time() - start_time
-    print(f"Fit time: {fit_time:.1f}s")
+    if verbose: print(f"Fit time: {fit_time:.1f}s")
 
     # Make predictions
     if verbose: print("... predicting")
