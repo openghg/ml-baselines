@@ -189,7 +189,7 @@ def plot_model_confidence(labelled_df, title="", cmap=None, shade_train_and_val_
     ax.set_title(title if title else "Model confidence over observations")
     ax.set_ylabel("mole fraction in air / ppt")
     ax.set_xlabel("Time")
-    ax.legend(loc="upper left")
+    ax.legend(loc="best")
 
     plt.show()
 
@@ -271,7 +271,7 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
                 ax.scatter(anomaly_months.index, anomaly_months["true_monthly_mf"] - deviation , label=f"Anomalies > {threshold} std", color='red', marker='^', s=10*threshold, zorder=5)
         
 
-    ax.legend(loc="upper left")
+    ax.legend(loc="best" if not plot_count_hist else "upper left")
 
     plt.show()
 
