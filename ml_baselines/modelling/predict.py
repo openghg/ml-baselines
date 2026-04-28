@@ -114,6 +114,10 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
             baseline labels, and predicted baseline labels, all aligned by
             their datetime index.
     """
+    y = y.copy()
+    df_obs = df_obs.copy()
+    y.index = y.index.astype("datetime64[ns]")
+    df_obs.index = df_obs.index.astype("datetime64[ns]")
 
     y = y[(y.index.year >= min(df_obs.index.year)) & (y.index.year <= max(df_obs.index.year))]
     labelled_df = pd.merge_asof(pd.DataFrame({"baseline": y}), df_obs["mf"], left_index=True, right_index=True, direction='nearest')
