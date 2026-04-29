@@ -41,6 +41,7 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
     print(f"Loaded model from {model_file[-1]}")
     return model_dict['model'], model_dict['info']
 
+
 def predict_baselines(site, model, time_shift_hours=[6, 12, 18, 24], prediction_threshold=0.5, prediction_mode="validation", scaler=None, verbose=True, save_preds = False, return_proba=False):
     """
     Predict baseline events for a given site using a trained model.
@@ -131,17 +132,70 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     return labelled_df
 
 
+def assess_InTEM(labelled_df):
+    """
+    Assesses the InTEM/"true" baselines by identifying anomalies and months with a low baseline ratio.
+    Considers points outside 3 standard deviations from the mean for a given month to be anomalous.
+
+    Args:
+        labelled_df (pd.DataFrame): A DataFrame containing the observed molefractions in a
+            column named "mf", true baseline labels in a column named
+            "baseline", and predicted baseline labels in a column named
+            "predicted_baseline". The DataFrame should have a datetime index.
+
+    Returns:
+        assessment_dict (dict): A dictionary containing:
+            - "low_baseline_months" (list): List of months where baseline points are less than 10% of total observations that month.
+            - "pct_anomalous" (float): Percentage of true baseline points that are anomalous (outside 3 std), given as an average across months.
+            - "anomalies" (pd.DataFrame): DataFrame containing the anomalous observations.
+    """
+
+    low_baseline_months = []
+    monthly_anomalies = []
+    total_months = 0
+    for month, group in labelled_df.groupby(pd.Grouper(freq='ME')):
+        total = len(group)
+        if total == 0:
+            continue
+        total_months += 1
+        baselines = group[group["baseline"]==1]
+        n_baselines = len(baselines)
+
+        # Check for low baseline months (where baselines < 5%)
+        if n_baselines / total < 0.05:
+            low_baseline_months.append(month)
+
+        # Identify baseline anomalies
+        if n_baselines > 0:
+            monthly_mean = baselines["mf"].mean()
+            monthly_std = baselines["mf"].std()
+            anomalies = baselines[np.abs(baselines["mf"] - monthly_mean) > 3 * monthly_std]
+            monthly_anomalies.append(anomalies)
+
+    pct_low_baseline_months = 100 * len(low_baseline_months) / total_months
+    intem_anomalies = pd.concat(monthly_anomalies) if monthly_anomalies else pd.DataFrame()
+    pct_anomalies = 100 * len(intem_anomalies) / len(labelled_df[labelled_df["baseline"] == 1])
+
+    assessment_dict = {
+        'low_baseline_months': low_baseline_months,
+        'pct_low_baseline_months': pct_low_baseline_months,
+        'intem_anomalies': intem_anomalies,
+        'pct_anomalies': pct_anomalies,
+    }
+
+    return assessment_dict
+
 
 def calculate_monthly_means(labelled_df, add_stats=True):
     """
     Calculate monthly means of the observed molefractions.
 
     Args:
-        labelled_df: A DataFrame containing the observed molefractions in a
+        labelled_df (pd.DataFrame): A DataFrame containing the observed molefractions in a
             column named "mf", true baseline labels in a column named
             "baseline", and predicted baseline labels in a column named
             "predicted_baseline". The DataFrame should have a datetime index.
-        add_stats: Whether to add MAE, MAPE, bias, and coefficient of variation for each month as additional columns.
+        add_stats (bool): Whether to add MAE, MAPE, bias, and coefficient of variation for each month as additional columns.
 
     Returns:
         pd.DataFrame: A DataFrame containing the monthly mean molefractions and
@@ -169,8 +223,8 @@ def calculate_monthly_means(labelled_df, add_stats=True):
         monthly_means["MAPE"] = monthly_means["MAE"] / monthly_means["true_monthly_mf"]
         monthly_means["bias"] = monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"]
 
-
     return monthly_means
+
 
 class BaselineLabelledObservations:
     def __init__(self, y, y_pred, df_obs, site, species, y_proba=None):
@@ -203,7 +257,8 @@ class BaselineLabelledObservations:
         self.site = site
         self.species = species
         self.labelled_df = align_predictions_and_obs(y, y_pred, df_obs, y_proba=y_proba)
-
+        if len(self.labelled_df) == 0:
+            raise ValueError(f"No overlapping time period between model predictions and AGAGE data for {species}.")
 
         self.data_periods = {
         "train": cfg.training_period[site], 
@@ -212,7 +267,7 @@ class BaselineLabelledObservations:
         "full": cfg.full_period[site] if cfg.full_period[site] is not None else (cfg.training_period[site][0], cfg.testing_period[site][1])
         }
 
-    def get_prediction_scores(self):
+    def get_prediction_scores(self, verbose=True):
         """
         Calculate precision, recall, and F1 score for each data period.
 
@@ -227,22 +282,33 @@ class BaselineLabelledObservations:
             precision = precision_score(period_df["baseline"], period_df["predicted_baseline"])
             recall = recall_score(period_df["baseline"], period_df["predicted_baseline"])
             f1 = f1_score(period_df["baseline"], period_df["predicted_baseline"])
-            print(f"{period[:6]} set - Precision: {precision:.3f}, Recall: {recall:.3f}, F1 Score: {f1:.3f}")
+            if verbose: print(f"{period[:6]} set - Precision: {precision:.3f}, Recall: {recall:.3f}, F1 Score: {f1:.3f}")
 
             scores[period] = {"precision": precision, "recall": recall, "f1": f1}
         
             self.scores = scores
-        
 
-    def calculate_monthly_means(self):
+
+    def assess_InTEM(self, verbose=True):
+        if not hasattr(self, "intem_assessment"):
+            self.intem_assessment = assess_InTEM(self.labelled_df)
+            if len(self.intem_assessment['low_baseline_months']) > 0:
+                if verbose: print(f"Number of months with fewer than 5% baselines: {len(self.intem_assessment['low_baseline_months'])} ({self.intem_assessment['pct_low_baseline_months']:.2f}%)")
+            if self.intem_assessment['pct_anomalies'] > 0:
+                if verbose: print(f"Percentage of true baselines considered anomalous: {self.intem_assessment['pct_anomalies']:.2f}%")
+        else:
+            print("True baselines have already been assessed. Use the 'intem_assessment' attribute to access the results.")
+
+
+    def calculate_monthly_means(self, verbose=True):
         if not hasattr(self, "monthly_means"):
             self.monthly_means = calculate_monthly_means(self.labelled_df)
-            self.find_monthly_anomalies()
+            self.find_monthly_anomalies(verbose=verbose)
         else:
             print("Monthly means have already been calculated. Use the 'monthly_means' attribute to access the DataFrame containing these means.")
 
 
-    def find_monthly_anomalies(self):
+    def find_monthly_anomalies(self, verbose=True):
         if not hasattr(self, "monthly_means"):
             self.calculate_monthly_means()
 
@@ -264,12 +330,12 @@ class BaselineLabelledObservations:
 
         self.monthly_means["is_missing"] = self.monthly_means.index.isin(missing_months)
 
-        print(f"Found {len(missing_months)} missing months, and {sum(self.monthly_means['is_anomaly'] > 0)} anomaly months (with {sum(self.monthly_means['is_anomaly'] == 1)}, {sum(self.monthly_means['is_anomaly'] == 3)}, and {sum(self.monthly_means['is_anomaly'] == 5)} months with deviations greater than 1, 3, and 5 standard deviations respectively).")
+        if verbose: print(f"Found {len(missing_months)} missing months, and {sum(self.monthly_means['is_anomaly'] > 0)} anomaly months (with {sum(self.monthly_means['is_anomaly'] == 1)}, {sum(self.monthly_means['is_anomaly'] == 3)}, and {sum(self.monthly_means['is_anomaly'] == 5)} months with deviations greater than 1, 3, and 5 standard deviations respectively).")
 
-    def print_monthly_stats(self):
+    def print_monthly_stats(self, verbose=True):
         # self.labelled_df already has columns mae, mape etc so just need to print the mean of these columns across the dataset
         if not hasattr(self, "monthly_means"):
-            self.calculate_monthly_means()
+            self.calculate_monthly_means(verbose=verbose)
 
         scores = {}
         for period in self.data_periods:
@@ -283,14 +349,13 @@ class BaselineLabelledObservations:
             bias = np.mean(period_df["bias"])
             rmse = np.sqrt(np.mean((period_df["MAE"] ** 2)))
 
-            print(f"{period[:6]} set - MAE: {mae:.3f}, MAPE: {100*mape:.3f}%, bias: {bias:.3f}, RMSE: {rmse:.3f}")
+            if verbose: print(f"{period[:6]} set - MAE: {mae:.3f}, MAPE: {100*mape:.3f}%, bias: {bias:.3f}, RMSE: {rmse:.3f}")
 
             scores[period] = {"MAE": mae, "MAPE": mape, "bias": bias, "RMSE": rmse}
 
         self.monthly_scores = scores
 
     ## CALLS TO PLOTTING FUNCTIONS
-        
     def plot_confusion_matrix(self, normalise=True, title="Confusion Matrix"):
         plot_confusion_matrix(self.labelled_df["baseline"], self.labelled_df["predicted_baseline"], normalise=normalise, title=title)
         
@@ -299,7 +364,6 @@ class BaselineLabelledObservations:
             title = f"MF of {self.species.upper()} at {self.site} with InTEM baseline labels"
         plot_obs(self.labelled_df, title=title)
 
-    
     def plot_obs_with_labels(self, title=None, plot_true_negatives=True):
         if title is None:
             title = f"MF of {self.species.upper()} at {self.site} with baseline and model Predictions"
@@ -314,8 +378,6 @@ class BaselineLabelledObservations:
         
         plot_model_confidence(self.labelled_df, title=title, cmap=cmap, site=self.site, shade_train_and_val_periods=True)
 
-
-
     def plot_monthly_means(self, shade_train_and_val_periods=True, plot_obs=True, plot_count_hist=False, show_anomalies=False):
         if not hasattr(self, "monthly_means"):
             self.calculate_monthly_means()
@@ -329,5 +391,3 @@ class BaselineLabelledObservations:
             self.calculate_monthly_means()
 
         plot_baseline_count_hist(self.monthly_means)
-
-    
