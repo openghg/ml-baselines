@@ -136,6 +136,7 @@ def assess_InTEM(labelled_df):
     """
     Assesses the InTEM/"true" baselines by identifying anomalies and months with a low baseline ratio.
     Considers points outside 3 standard deviations from the mean for a given month to be anomalous.
+    Also quantifies the percentage of these true anomalies also considered baseline by the model.
 
     Args:
         labelled_df (pd.DataFrame): A DataFrame containing the observed molefractions in a
@@ -146,8 +147,10 @@ def assess_InTEM(labelled_df):
     Returns:
         assessment_dict (dict): A dictionary containing:
             - "low_baseline_months" (list): List of months where baseline points are less than 10% of total observations that month.
+            - "pct_low_baseline_months": Percentage of total months that have a low baseline ratio (<10%)
+            - "intem_anomalies" (pd.DataFrame): DataFrame containing the anomalous observations.
             - "pct_anomalous" (float): Percentage of true baseline points that are anomalous (outside 3 std), given as an average across months.
-            - "anomalies" (pd.DataFrame): DataFrame containing the anomalous observations.
+            - "pct_anomalies_true_pos" (float): Percentage of true baseline points considered to be anomalous that are also classified as baseline by the model.
     """
 
     low_baseline_months = []
@@ -174,13 +177,15 @@ def assess_InTEM(labelled_df):
 
     pct_low_baseline_months = 100 * len(low_baseline_months) / total_months
     intem_anomalies = pd.concat(monthly_anomalies) if monthly_anomalies else pd.DataFrame()
-    pct_anomalies = 100 * len(intem_anomalies) / len(labelled_df[labelled_df["baseline"] == 1])
+    pct_anomalous = 100 * len(intem_anomalies) / len(labelled_df[labelled_df["baseline"] == 1]) if len(intem_anomalies) > 0 else 0.0
+    pct_anomalies_true_pos = 100 * len(intem_anomalies[intem_anomalies["predicted_baseline"] == 1]) / len(intem_anomalies) if len(intem_anomalies) > 0 else 0.0
 
     assessment_dict = {
         'low_baseline_months': low_baseline_months,
         'pct_low_baseline_months': pct_low_baseline_months,
         'intem_anomalies': intem_anomalies,
-        'pct_anomalies': pct_anomalies,
+        'pct_anomalous': pct_anomalous,
+        'pct_anomalies_true_pos': pct_anomalies_true_pos
     }
 
     return assessment_dict
