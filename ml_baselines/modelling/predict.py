@@ -311,8 +311,10 @@ class BaselineLabelledObservations:
                 if verbose: print(f"Percentage of true baselines considered anomalous: {self.true_baseline_assessment['pct_anomalous']:.2f}%")
                 pct_anomalies_true_pos = self.true_baseline_assessment['pct_anomalies_true_pos']
                 if pct_anomalies_true_pos > 50:
-                    print(f"    Warning: {self.true_baseline_assessment['pct_anomalies_true_pos']:.2f}% of true baseline points considered anomalous are also classified as baseline by the model. "
-                           "The model may be learning from these 'anomalous' InTEM labels.")
+                    if verbose: print(f"    WARNING: {self.true_baseline_assessment['pct_anomalies_true_pos']:.2f}% of true baseline points considered anomalous are also classified as baseline by the model. "
+                                       "The model may be learning from these 'anomalous' InTEM labels.")
+                    else: print(f"WARNING: {self.true_baseline_assessment['pct_anomalous']:.2f}% of true baselines are considered anomalous and {self.true_baseline_assessment['pct_anomalies_true_pos']:.2f}% of these are also classified as baseline by the model. "
+                                 "The model may be learning from these 'anomalous' InTEM labels.")
         else:
             print("True baselines have already been assessed. Use the 'true_baseline_assessment' attribute to access the results.")
 
