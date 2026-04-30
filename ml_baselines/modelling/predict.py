@@ -132,7 +132,7 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     return labelled_df
 
 
-def assess_InTEM(labelled_df):
+def assess_true_baselines(labelled_df):
     """
     Assesses the InTEM/"true" baselines by identifying anomalies and months with a low baseline ratio.
     Considers points outside 3 standard deviations from the mean for a given month to be anomalous.
@@ -146,9 +146,9 @@ def assess_InTEM(labelled_df):
 
     Returns:
         assessment_dict (dict): A dictionary containing:
-            - "low_baseline_months" (list): List of months where baseline points are less than 10% of total observations that month.
-            - "pct_low_baseline_months": Percentage of total months that have a low baseline ratio (<10%)
-            - "intem_anomalies" (pd.DataFrame): DataFrame containing the anomalous observations.
+            - "low_baseline_months" (list): List of months where baseline points are less than 5% of total observations that month.
+            - "pct_low_baseline_months": Percentage of total months that have a low baseline ratio (<5%)
+            - "true_baseline_anomalies" (pd.DataFrame): DataFrame containing the anomalous observations.
             - "pct_anomalous" (float): Percentage of true baseline points that are anomalous (outside 3 std), given as an average across months.
             - "pct_anomalies_true_pos" (float): Percentage of true baseline points considered to be anomalous that are also classified as baseline by the model.
     """
@@ -164,7 +164,7 @@ def assess_InTEM(labelled_df):
         baselines = group[group["baseline"]==1]
         n_baselines = len(baselines)
 
-        # Check for low baseline months (where baselines < 5%)
+        # Check for low baseline months
         if n_baselines / total < 0.05:
             low_baseline_months.append(month)
 
@@ -176,14 +176,14 @@ def assess_InTEM(labelled_df):
             monthly_anomalies.append(anomalies)
 
     pct_low_baseline_months = 100 * len(low_baseline_months) / total_months
-    intem_anomalies = pd.concat(monthly_anomalies) if monthly_anomalies else pd.DataFrame()
-    pct_anomalous = 100 * len(intem_anomalies) / len(labelled_df[labelled_df["baseline"] == 1]) if len(intem_anomalies) > 0 else 0.0
-    pct_anomalies_true_pos = 100 * len(intem_anomalies[intem_anomalies["predicted_baseline"] == 1]) / len(intem_anomalies) if len(intem_anomalies) > 0 else 0.0
+    true_baseline_anomalies = pd.concat(monthly_anomalies) if monthly_anomalies else pd.DataFrame()
+    pct_anomalous = 100 * len(true_baseline_anomalies) / len(labelled_df[labelled_df["baseline"] == 1]) if len(true_baseline_anomalies) > 0 else 0.0
+    pct_anomalies_true_pos = 100 * len(true_baseline_anomalies[true_baseline_anomalies["predicted_baseline"] == 1]) / len(true_baseline_anomalies) if len(true_baseline_anomalies) > 0 else 0.0
 
     assessment_dict = {
         'low_baseline_months': low_baseline_months,
         'pct_low_baseline_months': pct_low_baseline_months,
-        'intem_anomalies': intem_anomalies,
+        'true_baseline_anomalies': true_baseline_anomalies,
         'pct_anomalous': pct_anomalous,
         'pct_anomalies_true_pos': pct_anomalies_true_pos
     }
@@ -272,6 +272,7 @@ class BaselineLabelledObservations:
         "full": cfg.full_period[site] if cfg.full_period[site] is not None else (cfg.training_period[site][0], cfg.testing_period[site][1])
         }
 
+
     def get_prediction_scores(self, verbose=True):
         """
         Calculate precision, recall, and F1 score for each data period.
@@ -294,15 +295,26 @@ class BaselineLabelledObservations:
             self.scores = scores
 
 
-    def assess_InTEM(self, verbose=True):
-        if not hasattr(self, "intem_assessment"):
-            self.intem_assessment = assess_InTEM(self.labelled_df)
-            if len(self.intem_assessment['low_baseline_months']) > 0:
-                if verbose: print(f"Number of months with fewer than 5% baselines: {len(self.intem_assessment['low_baseline_months'])} ({self.intem_assessment['pct_low_baseline_months']:.2f}%)")
-            if self.intem_assessment['pct_anomalies'] > 0:
-                if verbose: print(f"Percentage of true baselines considered anomalous: {self.intem_assessment['pct_anomalies']:.2f}%")
+    # def calculate_true_baseline_cv(self, verbose=True):
+    #     if not hasattr(self, "baseline_cv"):
+    #         self.baseline_cv = baseline_cv_detrended(self.labelled_df)
+    #         if verbose: print('we recommend...')
+    #     else:
+    #         print("Baseline CV has already been calculated. Use the 'baseline_cv' attribute to access the result.")
+
+
+    def assess_true_baselines(self, verbose=True):
+        if not hasattr(self, "true_baseline_assessment"):
+            self.true_baseline_assessment = assess_true_baselines(self.labelled_df)
+            if verbose: print(f"Number of months with a low baseline ratio (<5%): {len(self.true_baseline_assessment['low_baseline_months'])} ({self.true_baseline_assessment['pct_low_baseline_months']:.2f}% of all months)")
+            if self.true_baseline_assessment['pct_anomalous'] > 0:
+                if verbose: print(f"Percentage of true baselines considered anomalous: {self.true_baseline_assessment['pct_anomalous']:.2f}%")
+                pct_anomalies_true_pos = self.true_baseline_assessment['pct_anomalies_true_pos']
+                if pct_anomalies_true_pos > 50:
+                    print(f"    Warning: {self.true_baseline_assessment['pct_anomalies_true_pos']:.2f}% of true baseline points considered anomalous are also classified as baseline by the model. "
+                           "The model may be learning from these 'anomalous' InTEM labels.")
         else:
-            print("True baselines have already been assessed. Use the 'intem_assessment' attribute to access the results.")
+            print("True baselines have already been assessed. Use the 'true_baseline_assessment' attribute to access the results.")
 
 
     def calculate_monthly_means(self, verbose=True):
