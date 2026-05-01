@@ -14,7 +14,7 @@ from ml_baselines.modelling.plot import plot_confusion_matrix, plot_obs, plot_ob
 from ml_baselines.config import Config
 cfg = Config()
 
-def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, timestamp=None, suffix=None):
+def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, timestamp=None, suffix=None, verbose=True):
     """
     Load a trained model and its extra info from a specified folder. If timestamp is provided, it will look for a model file with that timestamp; otherwise, it will load the most recent model file for the given site and model type.
 
@@ -28,6 +28,7 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
     model: The loaded model object.
     extra_info: A dictionary containing extra information about the model (e.g., scores, scaler, model inputs).
     """
+
     model_path = Path(models_folder) / site / f"{model_type}_model_*.joblib"
     if timestamp is not None and suffix is not None:
         model_path = model_path.with_name(f"{model_type}_model_{timestamp}_{suffix}.joblib")
@@ -39,8 +40,11 @@ def load_baseline_model(site, model_type="mlp", models_folder=cfg.models_path, t
     model_file = sorted(glob.glob(str(model_path)))
     if not model_file:
         raise FileNotFoundError(f"No model found at {model_path}")
+
     model_dict = joblib.load(model_file[-1])  # Load the most recent model file
-    print(f"Loaded model from {model_file[-1]}")
+
+    if verbose: print(f"Loaded model from {model_file[-1]}")
+
     return model_dict['model'], model_dict['info']
 
 
@@ -161,13 +165,13 @@ def calculate_true_baseline_cv(labelled_df, remove_seasonality=True):
     baseline = labelled_df[labelled_df["baseline"] == 1]["mf"]
     orig_monthly_mean = baseline.resample("ME").mean().dropna()
 
-    # calculate coverage
+    # calculate coverage and store
     monthly_coverage = len(orig_monthly_mean) / len(pd.date_range(baseline.index.min(), baseline.index.max(), freq="ME"))
     cv_dict['pct_monthly_coverage'] = monthly_coverage * 100
 
     if remove_seasonality:
         # remove seasonal variation and long-term trends
-        monthly_mean_filled = orig_monthly_mean.resample("ME").asfreq().interpolate(method="time", limit=3)
+        monthly_mean_filled = orig_monthly_mean.resample("ME").asfreq().interpolate(method="time")
         stl = STL(monthly_mean_filled, period=12, robust=True)
         result = stl.fit()
         residuals = result.resid
@@ -350,7 +354,7 @@ class BaselineLabelledObservations:
     def calculate_true_baseline_cv(self, remove_seasonality=True, verbose=True):
         if not hasattr(self, "baseline_cv"):
             self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, remove_seasonality=remove_seasonality)
-            if remove_seasonality and self.baseline_cv['pct_monthly_coverage'] < 80:
+            if remove_seasonality and self.baseline_cv['pct_monthly_coverage'] < 75:
                 print(f"WARNING: Monthly coverage is {self.baseline_cv['pct_monthly_coverage']:.2f}%. STL decomposition may be unreliable.")
             if verbose: print(f"Baseline CV: {self.baseline_cv['cv']:.4f}")
         else:
