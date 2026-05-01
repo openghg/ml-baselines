@@ -4,7 +4,9 @@ import joblib
 import glob
 from pathlib import Path
 
+from scipy import stats
 from sklearn.metrics import precision_score, recall_score, f1_score
+from statsmodels.tsa.seasonal import STL
 
 from ml_baselines.modelling.train import get_train_test_data
 from ml_baselines.modelling.plot import plot_confusion_matrix, plot_obs, plot_obs_with_labels, plot_monthly_means, plot_baseline_count_hist, plot_model_confidence
@@ -130,6 +132,54 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
         y_proba = y_proba.reindex(labelled_df.index, method="nearest")
         labelled_df["predicted_proba"] = y_proba
     return labelled_df
+
+
+def calculate_true_baseline_cv(labelled_df, remove_seasonality=True):
+    """
+    Quantifies the noise in the baseline molefractions as an assessment of model utility.
+
+    Args:
+        labelled_df (pd.DataFrame): A DataFrame containing the observed molefractions in a
+            column named "mf", true baseline labels in a column named
+            "baseline", and predicted baseline labels in a column named
+            "predicted_baseline". The DataFrame should have a datetime index.
+        remove_seasonality (bool): Whether to remove seasonal trends from the data using STL decomposition.
+            If True, also removes long-term trend. If False, data is detrended using a simple linear fit.
+
+    Returns:
+        cv_dict (dict): A dictionary containing:
+            "pct_monthly_coverage" (float): The percentage of months with sufficient baseline points for a monthly mean. 
+                If less than 80%, the calculated CV may be unreliable if removing seasonal trends.
+            "cv" (float): The calculated coefficient of variation
+    """
+
+    cv_dict = {}
+
+    # extract true baselines and resample to monthly means
+    baseline = labelled_df[labelled_df["baseline"] == 1]["mf"]
+    orig_monthly_mean = baseline.resample("ME").mean().dropna()
+
+    # calculate coverage
+    monthly_coverage = len(orig_monthly_mean) / len(pd.date_range(baseline.index.min(), baseline.index.max(), freq="ME"))
+    cv_dict['pct_monthly_coverage'] = monthly_coverage * 100
+
+    if remove_seasonality:
+        # remove seasonal variation and long-term trends
+        monthly_mean_filled = orig_monthly_mean.resample("ME").asfreq().interpolate(method="time", limit=3)
+        stl = STL(monthly_mean_filled, period=12, robust=True)
+        result = stl.fit()
+        residuals = result.resid
+
+    else:
+        # detrend by removing a simple linear fit
+        x = np.arange(len(orig_monthly_mean))
+        slope, intercept, _, _, _ = stats.linregress(x, orig_monthly_mean.values)
+        residuals = orig_monthly_mean.values - (intercept + slope * x)
+
+    cv = residuals.std() / orig_monthly_mean.mean()
+    cv_dict['cv'] = cv.item()
+
+    return cv_dict
 
 
 def assess_true_baselines(labelled_df):
@@ -295,12 +345,14 @@ class BaselineLabelledObservations:
             self.scores = scores
 
 
-    # def calculate_true_baseline_cv(self, verbose=True):
-    #     if not hasattr(self, "baseline_cv"):
-    #         self.baseline_cv = baseline_cv_detrended(self.labelled_df)
-    #         if verbose: print('we recommend...')
-    #     else:
-    #         print("Baseline CV has already been calculated. Use the 'baseline_cv' attribute to access the result.")
+    def calculate_true_baseline_cv(self, remove_seasonality=True, verbose=True):
+        if not hasattr(self, "baseline_cv"):
+            self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, remove_seasonality=remove_seasonality)
+            if remove_seasonality and self.baseline_cv['pct_monthly_coverage'] < 80:
+                print(f"WARNING: Monthly coverage is {self.baseline_cv['pct_monthly_coverage']:.2f}%. STL decomposition may be unreliable.")
+            if verbose: print(f"Baseline CV: {self.baseline_cv['cv']:.4f}")
+        else:
+            print("Baseline CV has already been calculated. Use the 'baseline_cv' attribute to access the result.")
 
 
     def assess_true_baselines(self, verbose=True):
