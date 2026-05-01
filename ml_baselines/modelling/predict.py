@@ -123,6 +123,8 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     df_obs.index = df_obs.index.astype("datetime64[ns]")
 
     y = y[(y.index.year >= min(df_obs.index.year)) & (y.index.year <= max(df_obs.index.year))]
+    if y.empty:
+        raise ValueError(f"No overlap between prediction period and observation period.")
     labelled_df = pd.merge_asof(pd.DataFrame({"baseline": y}), df_obs["mf"], left_index=True, right_index=True, direction='nearest')
     labelled_df = labelled_df[["mf", "baseline"]]
     y_pred = y_pred.reindex(labelled_df.index, method="nearest")
