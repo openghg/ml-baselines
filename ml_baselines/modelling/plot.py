@@ -275,6 +275,7 @@ def plot_monthly_means(monthly_means, shade_train_and_val_periods=True, site=Non
 
     plt.show()
 
+
 def plot_baseline_count_hist(monthly_means, ax=None):
     """
     Plot a histogram of the monthly baseline counts for true and predicted baselines.
@@ -310,4 +311,53 @@ def plot_baseline_count_hist(monthly_means, ax=None):
         axis.legend(loc="center right")
 
 
+def plot_stl_components(true_baselines, orig_monthly_means, monthly_means_filled, stl_result):
+    """
+    Plots the components of the STL decomposition.
+    Computed when removing seasonality during the true baseline CV calculation.
+
+    Args:
+        true_baselines (pd.Series): The raw baseline observations with a datetime index.
+        orig_monthly_means (pd.Series): The monthly means of the baseline observations.
+        monthly_means_filled (pd.Series): The interpolated monthly means passed to STL.
+        stl_result: The fitted STL result object.
+        species (str): The species name. Used in the title if provided.
+        site (str): The site name. Used in the title if provided.
+        title (bool): Whether to add a suptitle. Default is True.
+    """
+
+    fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+
+    # plot 1 - raw observations (scattered) and monthly means with any interpolated regions highlights
+    interpolated_mask = ~monthly_means_filled.index.isin(orig_monthly_means.index)
+    axes[0].scatter(true_baselines.index, true_baselines.values,
+                    label='Raw observations', color='lightblue', s=2, zorder=1)
+    axes[0].plot(orig_monthly_means.index, orig_monthly_means.values,
+                    label='Raw monthly mean', color='blue', linewidth=1)
+    if interpolated_mask.any():
+        axes[0].scatter(monthly_means_filled.index[interpolated_mask], monthly_means_filled.values[interpolated_mask],
+                        label='Interpolation for STL fit', color='red', zorder=5, s=15)
+    axes[0].legend()
+    axes[0].set_title("Observations")
+
+    # plot 2 - overall trend
+    axes[1].plot(monthly_means_filled.index, stl_result.trend, color='red')
+    axes[1].set_title("Trend")
+
+    # plot 3 - seasonal trend
+    axes[2].plot(monthly_means_filled.index, stl_result.seasonal, color='purple')
+    axes[2].axhline(0, color='black', linestyle='--', linewidth=0.8)
+    axes[2].set_title("Seasonal")
+
+    # plot 4 - residuals
+    axes[3].plot(monthly_means_filled.index, stl_result.resid, color='green')
+    axes[3].axhline(0, color='black', linestyle='--', linewidth=0.8)
+    axes[3].set_title("Residuals")
+
+    for ax in axes:
+        axes[0].spines[['top', 'right']].set_visible(False)
+
+    fig.supylabel("Mole fraction in air / ppt")
+    fig.tight_layout()
+    plt.show()
 

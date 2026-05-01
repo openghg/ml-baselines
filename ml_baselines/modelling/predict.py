@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import joblib
@@ -9,7 +10,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 from statsmodels.tsa.seasonal import STL
 
 from ml_baselines.modelling.train import get_train_test_data
-from ml_baselines.modelling.plot import plot_confusion_matrix, plot_obs, plot_obs_with_labels, plot_monthly_means, plot_baseline_count_hist, plot_model_confidence
+from ml_baselines.modelling.plot import plot_confusion_matrix, plot_obs, plot_obs_with_labels, plot_monthly_means, plot_baseline_count_hist, plot_model_confidence, plot_stl_components
 
 from ml_baselines.config import Config
 cfg = Config()
@@ -140,7 +141,7 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     return labelled_df
 
 
-def calculate_true_baseline_cv(labelled_df, remove_seasonality=True):
+def calculate_true_baseline_cv(labelled_df, remove_seasonality=True, plot_stl=False):
     """
     Quantifies the noise in the baseline molefractions as an assessment of model utility.
 
@@ -151,6 +152,8 @@ def calculate_true_baseline_cv(labelled_df, remove_seasonality=True):
             "predicted_baseline". The DataFrame should have a datetime index.
         remove_seasonality (bool): Whether to remove seasonal trends from the data using STL decomposition.
             If True, also removes long-term trend. If False, data is detrended using a simple linear fit.
+        plot_stl (bool): Whether to plot the STL decomposition components (observed, trend, seasonal, and residuals).
+            Only valid when remove_seasonality=True.
 
     Returns:
         cv_dict (dict): A dictionary containing:
@@ -162,27 +165,30 @@ def calculate_true_baseline_cv(labelled_df, remove_seasonality=True):
     cv_dict = {}
 
     # extract true baselines and resample to monthly means
-    baseline = labelled_df[labelled_df["baseline"] == 1]["mf"]
-    orig_monthly_mean = baseline.resample("ME").mean().dropna()
+    true_baselines = labelled_df[labelled_df["baseline"] == 1]["mf"]
+    orig_monthly_means = true_baselines.resample("ME").mean().dropna()
 
     # calculate coverage and store
-    monthly_coverage = len(orig_monthly_mean) / len(pd.date_range(baseline.index.min(), baseline.index.max(), freq="ME"))
+    monthly_coverage = len(orig_monthly_means) / len(pd.date_range(true_baselines.index.min(), true_baselines.index.max(), freq="ME"))
     cv_dict['pct_monthly_coverage'] = monthly_coverage * 100
 
     if remove_seasonality:
         # remove seasonal variation and long-term trends
-        monthly_mean_filled = orig_monthly_mean.resample("ME").asfreq().interpolate(method="time")
-        stl = STL(monthly_mean_filled, period=12, robust=True)
-        result = stl.fit()
-        residuals = result.resid
+        monthly_means_filled = orig_monthly_means.resample("ME").asfreq().interpolate(method="time")
+        stl = STL(monthly_means_filled, period=12, robust=True)
+        stl_result = stl.fit()
+        residuals = stl_result.resid
+
+        if plot_stl:
+            plot_stl_components(true_baselines, orig_monthly_means, monthly_means_filled, stl_result)
 
     else:
         # detrend by removing a simple linear fit
-        x = np.arange(len(orig_monthly_mean))
-        slope, intercept, _, _, _ = stats.linregress(x, orig_monthly_mean.values)
-        residuals = orig_monthly_mean.values - (intercept + slope * x)
+        x = np.arange(len(orig_monthly_means))
+        slope, intercept, _, _, _ = stats.linregress(x, orig_monthly_means.values)
+        residuals = orig_monthly_means.values - (intercept + slope * x)
 
-    cv = residuals.std() / orig_monthly_mean.mean()
+    cv = residuals.std() / orig_monthly_means.mean()
     cv_dict['cv'] = cv.item()
 
     return cv_dict
@@ -351,9 +357,9 @@ class BaselineLabelledObservations:
             self.scores = scores
 
 
-    def calculate_true_baseline_cv(self, remove_seasonality=True, verbose=True):
+    def calculate_true_baseline_cv(self, remove_seasonality=True, plot_stl=False, verbose=True):
         if not hasattr(self, "baseline_cv"):
-            self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, remove_seasonality=remove_seasonality)
+            self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, remove_seasonality=remove_seasonality, plot_stl=plot_stl)
             if remove_seasonality and self.baseline_cv['pct_monthly_coverage'] < 75:
                 print(f"WARNING: Monthly coverage is {self.baseline_cv['pct_monthly_coverage']:.2f}%. STL decomposition may be unreliable.")
             if verbose: print(f"Baseline CV: {self.baseline_cv['cv']:.4f}")
