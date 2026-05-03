@@ -141,7 +141,7 @@ def align_predictions_and_obs(y, y_pred, df_obs, y_proba=None):
     return labelled_df
 
 
-def calculate_true_baseline_cv(labelled_df, remove_seasonality=True, plot_stl=False):
+def calculate_true_baseline_cv(labelled_df, site, eval_mode="train", remove_seasonality=True, plot_stl=False):
     """
     Quantifies the noise in the baseline molefractions as an assessment of model utility.
 
@@ -150,6 +150,10 @@ def calculate_true_baseline_cv(labelled_df, remove_seasonality=True, plot_stl=Fa
             column named "mf", true baseline labels in a column named
             "baseline", and predicted baseline labels in a column named
             "predicted_baseline". The DataFrame should have a datetime index.
+        site (str): The site the observations and baselines refer to.
+        eval_mode (str): Whether to evaluate on the "train", "validation", "test" or "full" set, where "full" is 
+            either the custom period defined in the config or the entire period from the start of training to the end of testing.
+            Default is "train".
         remove_seasonality (bool): Whether to remove seasonal trends from the data using STL decomposition.
             If True, also removes long-term trend. If False, data is detrended using a simple linear fit.
         plot_stl (bool): Whether to plot the STL decomposition components (observed, trend, seasonal, and residuals).
@@ -157,12 +161,26 @@ def calculate_true_baseline_cv(labelled_df, remove_seasonality=True, plot_stl=Fa
 
     Returns:
         cv_dict (dict): A dictionary containing:
+            "eval_mode" (str): The set used to calculate the CV.
             "pct_monthly_coverage" (float): The percentage of months with sufficient baseline points for a monthly mean. 
                 If less than 80%, the calculated CV may be unreliable if removing seasonal trends.
-            "cv" (float): The calculated coefficient of variation
+            "cv" (float): The calculated coefficient of variation.
     """
 
+    # Get set period
+    if eval_mode == "train" or eval_mode == "test":
+        set_name = f"{eval_mode}ing_period"
+    else:
+        set_name = f"{eval_mode}_period"
+    set_start, set_end = getattr(cfg,set_name)[site][0], getattr(cfg,set_name)[site][1]
+    labelled_df = labelled_df[(labelled_df.index.year >= set_start) & (labelled_df.index.year <= set_end)]
+    if labelled_df.empty:
+        raise ValueError(
+            f"No data found for the {eval_mode} period ({set_start}–{set_end}). "
+             "This may be because predictions were not made for this date range (note that eval_mode='train' or 'validation' require prediction_mode='full' in predict_baselines), or because there are no overlapping observations.")
+
     cv_dict = {}
+    cv_dict['eval_mode'] = eval_mode
 
     # extract true baselines and resample to monthly means
     true_baselines = labelled_df[labelled_df["baseline"] == 1]["mf"]
@@ -357,9 +375,9 @@ class BaselineLabelledObservations:
             self.scores = scores
 
 
-    def calculate_true_baseline_cv(self, remove_seasonality=True, plot_stl=False, verbose=True):
+    def calculate_true_baseline_cv(self, eval_mode="train", remove_seasonality=True, plot_stl=False, verbose=True):
         if not hasattr(self, "baseline_cv"):
-            self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, remove_seasonality=remove_seasonality, plot_stl=plot_stl)
+            self.baseline_cv = calculate_true_baseline_cv(self.labelled_df, self.site, eval_mode=eval_mode, remove_seasonality=remove_seasonality, plot_stl=plot_stl)
             if remove_seasonality and self.baseline_cv['pct_monthly_coverage'] < 75:
                 print(f"WARNING: Monthly coverage is {self.baseline_cv['pct_monthly_coverage']:.2f}%. STL decomposition may be unreliable.")
             if verbose: print(f"Baseline CV: {self.baseline_cv['cv']:.4f}")
