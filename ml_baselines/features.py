@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pandas as pd
+import re
 from pathlib import Path
 
 from sklearn.inspection import permutation_importance
@@ -442,7 +443,7 @@ def feature_importance(model, X_train, y_train,
         # group features by variable type
         df_grouping = df_importance.copy()
         df_grouping["variable"] = df_grouping["feature"].apply(
-            lambda col: col if col in ["hour_of_day", "day_of_year"] else col.split("_")[0]
+            lambda col: col if col in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', col.split("_")[0])
         )
         df_importance = (
             df_grouping.groupby("variable")["importance"]
@@ -454,7 +455,7 @@ def feature_importance(model, X_train, y_train,
     else:
         # extract variable groups
         variables = np.unique([
-            col if col in ["hour_of_day", "day_of_year"] else col.split("_")[0]
+            col if col in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', col.split("_")[0])
             for col in X_train.columns
         ])
 
@@ -462,7 +463,7 @@ def feature_importance(model, X_train, y_train,
         orig_score = model.score(X_train, y_train)
         results = []
         for var in variables:
-            cols = [var] if var in ["hour_of_day", "day_of_year"] else [c for c in X_train.columns if c.startswith(var + "_")]
+            cols = [c for c in X_train.columns if (c if c in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', c.split("_")[0])) == var]
 
             scores_diff = []
             X_permuted = X_train.copy()
