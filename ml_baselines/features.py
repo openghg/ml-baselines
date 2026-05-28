@@ -1,9 +1,13 @@
-from pathlib import Path
+import getpass
+import gzip
+import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 import pandas as pd
-import getpass
-import gzip
+import re
+from pathlib import Path
+
+from sklearn.inspection import permutation_importance
 
 from ml_baselines.config import Config
 from ml_baselines.utils import longitude_to_360
@@ -333,7 +337,7 @@ def preprocess_all_features_arco_era5(force=False):
 def open_features(site,
                 start_year=1978,
                 end_year=2024,
-                time_shift_hours=[6],
+                time_shift_hours=[6, 12, 18, 24],
                 features_dir=""):
     """Opens the preprocessed features for a given site.
 
@@ -411,6 +415,99 @@ def open_features(site,
     df["day_of_year"] = df.index.day_of_year
 
     return df
+
+
+def feature_importance(model, X_train, y_train,
+                       use_permutation=False, n_repeats=100):
+    """Calculates feature importances for a trained model.
+
+    Args:
+        model: The trained model to analyse.
+        X_train (pd.DataFrame): The feature matrix used for training.
+        y_train (pd.DataFrame): The target labels used for training.
+        use_permutation (bool): Whether to use permutation importance. If False and the model has a feature_importances_ attribute, this will be used instead.
+        n_repeats (int): Number of times to repeat the permutation.
+
+    Returns:
+        pd.DataFrame: DataFrame with columns ['variable', 'importance_mean', 'importance_sum'],
+            sorted by importance_mean descending. Variables are grouped by type.
+    """
+
+    if hasattr(model, "feature_importances_") and not use_permutation:
+        importances = model.feature_importances_
+        df_importance = pd.DataFrame({
+                                "feature": X_train.columns,
+                                "importance": importances
+                                }).sort_values('importance', ascending=False)
+
+        # group features by variable type
+        df_grouping = df_importance.copy()
+        df_grouping["variable"] = df_grouping["feature"].apply(
+            lambda col: col if col in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', col.split("_")[0])
+        )
+        df_importance = (
+            df_grouping.groupby("variable")["importance"]
+            .agg(importance_mean="mean", importance_sum="sum")
+            .sort_values("importance_mean", ascending=False)
+            .reset_index()
+        )
+
+    else:
+        # extract variable groups
+        variables = np.unique([
+            col if col in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', col.split("_")[0])
+            for col in X_train.columns
+        ])
+
+        rng = np.random.default_rng(42)
+        orig_score = model.score(X_train, y_train)
+        results = []
+        for var in variables:
+            cols = [c for c in X_train.columns if (c if c in ["hour_of_day", "day_of_year"] else re.sub(r'\d+$', '', c.split("_")[0])) == var]
+
+            scores_diff = []
+            X_permuted = X_train.copy()
+            for _ in range(n_repeats):
+                shuffled_indices = rng.permutation(X_train.index)
+                for col in cols:
+                    X_permuted[col] = X_train.loc[shuffled_indices, col].values
+                scores_diff.append(orig_score - model.score(X_permuted, y_train))
+
+            results.append({
+                "variable": var,
+                "importance_mean": np.mean(scores_diff),
+                "importance_sum": np.sum(scores_diff)
+            })
+
+        df_importance = pd.DataFrame(results).sort_values("importance_mean", ascending=False).reset_index(drop=True)
+
+    return df_importance
+
+
+def plot_importance(df_importance, figsize=None):
+    """Plot feature importance.
+
+    Args:
+        df_importance (pd.DataFrame): DataFrame containing feature importance.
+        figsize: Optional (width, height) tuple. Auto-sized if None.
+
+    Returns:
+        (fig, ax) — call plt.show() or fig.savefig() in the caller.
+
+    """
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.barh(df_importance["variable"], df_importance["importance_mean"], color='#4C72B0')
+
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x*100:.2f}%'))
+    ax.set_xlabel("Mean Accuracy Drop (%)")
+    ax.invert_yaxis()
+    ax.xaxis.grid(True, linestyle='--', alpha=0.7)
+    ax.set_axisbelow(True)
+    ax.set_title("Feature Importance by Variable")
+
+    return fig, ax
 
 
 if __name__ == "__main__":
