@@ -2,65 +2,90 @@
     "MHD": {
         "name": "Mace Head, Ireland",
         "coords": [53.3267, -9.9046],
-        "training_period": [2016, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023],
-        "full_period": [2010, 2023]
+        "full_period": [1987, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [1987, 2024]
     },
+
     "RPB": {
         "name": "Ragged Point, Barbados",
         "coords": [13.1651, -59.4321],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [1980, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [1980, 2024]
     },
+
     "CGO": {
         "name": "Cape Grim, Australia",
         "coords": [-40.6833, 144.6894],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [1978, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [1978, 2024]
     },
+
     "GSN": {
         "name": "Gosan, South Korea",
         "coords": [33.2924, 126.1616],
-        "training_period": [2009, 2013],
-        "validation_period": [2014, 2014],
-        "testing_period": [2015, 2017]
+        "full_period": [2008, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2008, 2024]
     },
+
     "JFJ": {
         "name": "Jungfraujoch, Switzerland",
         "coords": [46.547767, 7.985883],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [2000, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2000, 2024]
     },
+
     "CMN": {
         "name": "Monte Cimone, Italy",
         "coords": [44.1932, 10.7014],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [2002, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2002, 2024]
     },
+
     "THD": {
         "name": "Trinidad Head, USA",
         "coords": [41.0541, -124.151],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [1996, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2000, 2024]
     },
+
     "ZEP": {
         "name": "Zeppelin, Svalbard",
         "coords": [78.9072, 11.8867],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [2002, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2002, 2024]
     },
+
     "SMO": {
         "name": "Cape Matatula, American Samoa",
         "coords": [-14.2474, -170.5644],
-        "training_period": [2014, 2018],
-        "validation_period": [2019, 2019],
-        "testing_period": [2020, 2023]
+        "full_period": [1979, 2024],
+
+        "training_period": [2017, 2019],
+        "validation_period": [2020, 2020],
+        "testing_period": [2000, 2024]
     }
 }

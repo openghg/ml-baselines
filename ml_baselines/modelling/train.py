@@ -95,7 +95,7 @@ def get_train_test_data(site, test_train,
         val_period = periods_dict["validation"]
         # first, let's check if there is overlap between either training or validation period and the test period, and if so print a warning
         if ((val_period[0] <= end_year) and (val_period[1] >= start_year)) or ((train_period[0] <= end_year) and (train_period[1] >= start_year)):
-            if verbose: print(f"    Warning: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
+            if verbose: print(f"    WARNING: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
             df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
             df = df[~((df.index.year >= val_period[0]) & (df.index.year <= val_period[1]))]
 
@@ -179,7 +179,7 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
             desired_count = int(np.round(undersample_ratio * majority_count))
             if desired_count < 1:
                 desired_count = 1
-                print("Warning: Desired count for majority class is less than 1. Setting to 1.")
+                print("WARNING: Desired count for majority class is less than 1. Setting to 1.")
             indices = np.linspace(0, len(majority_indices_to_subsample) - 1, desired_count).astype(int)
             indices = np.unique(indices)  # Ensure unique indices
             sampled_majority_indices = majority_indices_to_subsample[indices]
@@ -679,7 +679,7 @@ def train_baseline_model_grid_search(site,
     print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
 
     if save_cv_scores and not return_cv_scores:
-       print("Warning: save_cv_scores=True requires return_cv_scores. Setting return_cv_scores=True.")
+       print("WARNING: save_cv_scores=True requires return_cv_scores. Setting return_cv_scores=True.")
        return_cv_scores = True
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
