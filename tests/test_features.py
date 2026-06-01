@@ -1,8 +1,9 @@
+import numpy as np
+import os
 import pandas as pd
 from pathlib import Path
-import xarray as xr
-import numpy as np
 from tempfile import TemporaryDirectory
+import xarray as xr
 
 from ml_baselines.features import open_features, preprocess_features_arco_era5
 from ml_baselines.config import Config
@@ -21,6 +22,8 @@ level_variable_mapping = {
     "v_component_of_wind": "v",
 }
 
+test_dir = os.path.dirname(os.path.abspath(__file__))
+test_data_dir = os.path.join(test_dir, "data")
 
 def test_preprocess_features_arco_era5():
 
@@ -29,8 +32,8 @@ def test_preprocess_features_arco_era5():
 
     with TemporaryDirectory() as temp_dir:
         preprocess_features_arco_era5("MHD",
-                                    input_dir="tests/data",
-                                    output_dir=temp_dir)
+                                      input_dir=test_data_dir,
+                                      output_dir=temp_dir)
 
         # Check that the DataFrame has been created and has expected columns
         df = pd.read_csv(Path(temp_dir) / f"features-arco-era5_{site}_{year}.csv.gz",
@@ -38,7 +41,7 @@ def test_preprocess_features_arco_era5():
                          comment='#')
 
 
-    ds = xr.open_dataset(Path(cfg.root_dir) / f"tests/data/era5test-{site}-{year}.nc")
+    ds = xr.open_dataset(Path(cfg.root_dir) / f"{test_data_dir}/era5test-{site}-{year}.nc")
 
     # Test that time index matches
     ds_time = pd.to_datetime(ds['time'].values)
@@ -65,7 +68,7 @@ def test_open_features():
 
     with TemporaryDirectory() as temp_dir:
         preprocess_features_arco_era5("MHD",
-                                    input_dir="tests/data",
+                                    input_dir=test_data_dir,
                                     output_dir=temp_dir)
 
         df = open_features("MHD",

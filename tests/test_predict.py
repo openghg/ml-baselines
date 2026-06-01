@@ -124,7 +124,7 @@ def test_calculate_monthly_means_handles_no_baseline_data():
         "true_monthly_std",
         "true_monthly_count",
     ]])
-    assert monthly_means.index.dtype == "datetime64[ns]"
+    assert pd.api.types.is_datetime64_any_dtype(monthly_means.index)
 
 
 def test_calculate_monthly_means_handles_true_but_no_predicted_baselines():

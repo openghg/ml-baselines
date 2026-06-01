@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 import pytest
 from pandas import Series
-import pandas as pd
-import pytest
 
 from ml_baselines.modelling.train import (
     InputPerVariableScaler,
@@ -525,7 +523,7 @@ class TestTrainBaselineModelGridSearch:
             )
 
     def test_grid_search_uses_winning_sample_weights_in_final_fit(self, patched_grid_search_setup):
-        best_model, _, best_combo_kw = train_module.train_baseline_model_grid_search(
+        best_model, _, _, best_combo_kw = train_module.train_baseline_model_grid_search(
             site="dummy-site",
             model_type="mlp",
             param_grid={"alpha": [0.1]},
@@ -541,7 +539,7 @@ class TestTrainBaselineModelGridSearch:
         pd.testing.assert_series_equal(best_model.fit_sample_weight, expected_weights)
 
     def test_grid_search_returns_cv_scores_with_data_kwarg_metadata(self, patched_grid_search_setup):
-        _, _, best_combo_kw, all_cv_results = train_module.train_baseline_model_grid_search(
+        _, _, _, best_combo_kw, all_cv_results = train_module.train_baseline_model_grid_search(
             site="dummy-site",
             model_type="mlp",
             param_grid={"alpha": [0.1]},
