@@ -1,1 +1,2 @@
-This folder contains trained models for each site.
+This folder contains trained baseline classification models for each of the nine AGAGE sites.
+For each site, three models are provided: a Multi-Layer Perceptron (MLP), a Random Forest, and a Gradient Boosting classifier. Models are stored as .joblib files and can be loaded using the ``load_baseline_model`` function in ``ml_baselines/modelling/predict.py.``
