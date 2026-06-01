@@ -1,11 +1,15 @@
-from pathlib import Path
-import numpy as np
+'''
+This script defines a configuration class used throughout the ml-baselines package.
+The Config() class reads from a user-populated file (config.json) and site_info.json, providing access to file paths, site and model metadata.
+'''
+
 import json
+import numpy as np
+from pathlib import Path
 
-
-# Path to the root directories of the project
 root_dir = Path(__file__).parent.parent
 package_dir = root_dir / "ml_baselines"
+
 
 config_defaults = {
         "met_path": "",
@@ -15,15 +19,14 @@ config_defaults = {
         "met_type": "arco-era5"
     }
 
-
 def setup():
-    """Create a config file with default values.
+    """
+    Create a config file with default values.
 
     Default values are set, apart from met and obs paths, which the user must fill in. 
     The config file is created at ml_baselines/config.json.
     """
 
-    # Create empty config file
     config_path = package_dir / "config.json"
 
     with open(config_path, "w") as f:
@@ -33,7 +36,9 @@ def setup():
 
 
 class Config():
-    """Class to store configuration parameters.
+    """
+    Class to store configuration parameters.
+
     """
 
     def __init__(self):
@@ -66,13 +71,9 @@ class Config():
         self.testing_period = {site_code: site_info[site_code]["testing_period"] for site_code in site_info}
         self.full_period = {site_code: site_info[site_code]["full_period"] if "full_period" in site_info[site_code] else None for site_code in site_info}
 
-        # Met variables to be extracted (and their order)
         with open(root_dir / "data/met_info.json") as f:
             met_info = json.load(f)
         self.met_variables = met_info
-
-        # TODO: remove this?
-        self.confidence_threshold = 0.8
 
         # Define the grid system (deviations in degrees from the site location)
         self.lats_grid = np.array([0, 5, 5, 0, -5, -5, -5, 0, 5, 10, 10, 0, -10, -10, -10, 0, 10])
