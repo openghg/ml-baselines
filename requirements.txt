@@ -1,8 +1,11 @@
+cdsapi
+dask
+joblib
+matplotlib
+netcdf4
+numpy
 pandas
 scikit-learn>=1.7
-numpy
+statsmodels
+wheel
 xarray
-dask
-cdsapi
-netcdf4
-matplotlib
