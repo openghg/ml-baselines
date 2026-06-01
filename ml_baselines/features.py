@@ -3,13 +3,17 @@ This script defines functions used to preprocess and load meteorological feature
 Also includes functions for calculating and plotting feature importance from trained models.
 '''
 
+import cartopy.crs as ccrs
 import getpass
 import gzip
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
 import xarray as xr
+from cartopy.feature import BORDERS, LAND, OCEAN
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from pathlib import Path
 from sklearn.inspection import permutation_importance
 
@@ -431,6 +435,178 @@ def open_features(site,
     df = pd.concat([df, df_time], axis=1)
 
     return df
+
+
+def get_vars_points_timesteps(df_features):
+    """
+    Parses the column names of a meteorological feature dataset to extract variables, points, and timesteps.
+    Assumes column names are in the format "variable_point_timestep" or "variable_point" or "variable" (for 0D variables).
+
+    Args:
+        df_features (pd.DataFrame): A DataFrame containing the meteorological
+            features with a datetime index.
+
+    Returns:
+        tuple: A tuple containing lists of variables, points, and timesteps.
+    """
+
+    variables_0d = [col for col in df_features.columns if not re.search(r'_\d+', col)]
+    variables = []
+    points = []
+    timesteps = []
+
+    for col in df_features.columns:
+        if col in variables_0d:
+            variables.append(col)
+        elif len(col.split("_")) == 3:
+            var, point, timestep = col.split("_")
+            variables.append(var)
+            points.append(point)
+            timesteps.append(timestep)
+        elif len(col.split("_")) == 2:
+            var, point = col.split("_")
+            variables.append(var)
+            points.append(point)
+            timesteps.append("")
+
+    variables = sorted(list(set(variables)))
+    points = sorted([int(p) for p in list(set(points))])
+    timesteps = sorted(['0h' if t == '' else t for t in set(timesteps)], key=lambda t: int(t.replace('h', '')))
+    timesteps = ['' if t == '0h' else t for t in timesteps]
+
+    return variables, points, timesteps
+
+
+def plot_met_timeseries(site, df_features=None, features_dict=None, met_variable="u10", point=0, lag="",):
+    """
+    Plots a timeseries of a meteorological feature, with a monthly mean overlay to show the general trend where applicable.
+
+    Args:
+        site (str): The site the features refer to.
+        df_features (pd.DataFrame): A DataFrame containing the meteorological
+            features with a datetime index.
+        met_variable (str): The meteorological variable to plot (e.g. "u10", "blh").
+        point (int or str): The spatial point index, appended to the variable name
+            for non-0d variables.
+        lag (int or str): The time lag, appended to the variable name for non-0d
+            variables. If None or 0, no lag suffix is added.
+    """
+
+    if df_features is None and features_dict is None:
+        raise ValueError("Either df_features or features_dict must be provided.")
+    if features_dict is not None:
+        df_features = features_dict[site]
+
+    variables_0d = [col for col in df_features.columns if not re.search(r'_\d+', col)]
+    if met_variable in variables_0d:
+        variable = met_variable
+        monthly_mean = None
+    else:
+        variable = f"{met_variable}_{point}_{lag}" if lag else f"{met_variable}_{point}"
+        monthly_mean = df_features[variable].resample("ME").mean()
+
+    if variable.startswith('u') or variable.startswith('v'):
+        units = "m s$^{-1}$"
+    elif variable.startswith('blh'):
+        units = "m"
+    elif variable.startswith('sp'):
+        units = "Pa"
+    else:
+        units = None
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    ax.plot(df_features.index, df_features[variable],
+        color='steelblue', linewidth=0.7, alpha=0.7, label="Raw Observations")
+    if monthly_mean is not None:
+        ax.plot(monthly_mean.index, monthly_mean.values,
+                color='darkblue', linewidth=2, zorder=5, label="Monthly Mean")
+
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.spines[['left', 'bottom']].set_linewidth(0.8)
+    if units:
+        ax.set_ylabel(f"{variable} / {units}")
+    else:
+        ax.set_ylabel(f"{variable}")
+    ax.set_title(f"{variable} at {site}")
+    ax.legend(fontsize=9, loc="upper right")
+
+    ax.grid(axis='y', linestyle='--', linewidth=0.5, alpha=0.5)
+
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    ax.xaxis.set_minor_locator(mdates.MonthLocator(bymonth=[4,7,10]))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax.tick_params(axis='x', which='minor', length=3, color='grey')
+    ax.tick_params(axis='x', which='major', length=6)
+
+    fig.tight_layout()
+    plt.show()
+
+
+def plot_wind_vectors(site, df_features=None, features_dict=None, time_idx=0, height=10):
+    """
+    Plots wind vectors on grid points surrounding a given site on a map.
+    Args:
+        site (str): The site the features refer to.
+        df_features (pd.DataFrame): A DataFrame containing the meteorological
+            features with a datetime index.
+        time_idx (int): The index of the time step to plot. Default is 0.
+        height (int): The pressure level or height to plot wind vectors for.
+            Must be one of [10, 500, 850], corresponding to 10 m, 500 hPa,
+            and 850 hPa respectively.
+
+    """
+
+    if df_features is None and features_dict is None:
+        raise ValueError("Either df_features or features_dict must be provided.")
+    if features_dict is not None:
+        df_features = features_dict[site]
+
+    if height not in [10, 500, 850]:
+        raise ValueError("height must be one of [10, 500, 850]")
+    height_unit = "m" if height == 10 else "hPa"
+    wind_variables = [f"u{height}", f"v{height}"]
+
+    site_lat = cfg.site_coords_dict[site][0]
+    site_lon = cfg.site_coords_dict[site][1]
+    lats_grid = np.array([cfg.lats_grid[i] + site_lat for i in range(17)])
+    lons_grid = np.array([cfg.lons_grid[i] + site_lon for i in range(17)])
+
+    u_components = np.array([df_features.iloc[time_idx][f"{wind_variables[0]}_{i}"] for i in range(17)])
+    v_components = np.array([df_features.iloc[time_idx][f"{wind_variables[1]}_{i}"] for i in range(17)])
+
+
+    fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={'projection': ccrs.PlateCarree(central_longitude=site_lon)})
+    ax.set_extent([min(lons_grid)-2, max(lons_grid)+2,
+                   min(lats_grid)-2, max(lats_grid)+2],
+                  crs=ccrs.PlateCarree())
+
+    quiver = ax.quiver(lons_grid, lats_grid, u_components, v_components,scale=100, scale_units='width', width=0.003, color='darkblue', alpha=0.75, transform=ccrs.PlateCarree())
+    ax.quiverkey(quiver, 0.87, 0.03, 10, '10 m s$^{-1}$', labelpos='E', fontproperties={'size': 11})
+    ax.scatter(lons_grid, lats_grid, c='darkblue', s=50, marker='x', linewidth=3, transform=ccrs.PlateCarree())
+    ax.scatter(site_lon, site_lat, c='red', s=300, zorder=6, marker='^', edgecolors='darkblue', linewidth=0.5, transform=ccrs.PlateCarree())
+
+    ax.coastlines()
+    ax.add_feature(BORDERS, linestyle=':', linewidth=0.5)
+    ax.add_feature(LAND, edgecolor='black', alpha=0.5)
+    ax.add_feature(OCEAN, alpha=0.3)
+
+    gl = ax.gridlines(alpha=0.3, linestyle='--', linewidth=0.5, color='grey', zorder=10)
+    gl.top_labels = False
+    gl.right_labels = False
+    lon_ticks = np.arange(round(min(lons_grid)/5)*5, round(max(lons_grid)/5)*5 + 5, 5)
+    lat_ticks = np.arange(round(min(lats_grid)/5)*5, round(max(lats_grid)/5)*5 + 5, 5)
+    ax.set_xticks(lon_ticks, crs=ccrs.PlateCarree())
+    ax.set_yticks(lat_ticks, crs=ccrs.PlateCarree())
+    ax.xaxis.set_major_formatter(LongitudeFormatter())
+    ax.yaxis.set_major_formatter(LatitudeFormatter())
+
+    timestamp = df_features.index[time_idx].strftime('%Y-%m-%d %H:%M')
+    ax.set_title(f'{height} {height_unit} Wind Vectors at {site} ({timestamp})',
+                 fontsize=13, pad=10)
+
+    fig.tight_layout()
+    plt.show()
 
 
 def feature_importance(model, X_train, y_train,
