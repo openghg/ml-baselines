@@ -1,5 +1,8 @@
-import numpy as np
+'''
+This script provides a utility function for converting longitudes from the -180 to 180 range to the 0 to 360 range.
+'''
 
+import numpy as np
 
 def longitude_to_360(lons):
     """

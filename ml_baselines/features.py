@@ -1,18 +1,23 @@
+'''
+This script defines functions used to preprocess and load meteorological features derived from ERA5 reanalysis data for use in training the baseline models.
+Also includes functions for calculating and plotting feature importance from trained models.
+'''
+
 import getpass
 import gzip
 import matplotlib.pyplot as plt
 import numpy as np
-import xarray as xr
 import pandas as pd
 import re
+import xarray as xr
 from pathlib import Path
-
 from sklearn.inspection import permutation_importance
 
 from ml_baselines.config import Config
 from ml_baselines.utils import longitude_to_360
 
 cfg = Config()
+
 site_coords_dict = cfg.site_coords_dict
 met_path = Path(cfg.met_path)
 models_path = Path(cfg.models_path)
@@ -26,7 +31,8 @@ time_coord = "valid_time"
 
 
 def preprocess_features(site, year, force=False):
-    """Preprocesses the meteorological data for a given site using slices of ERA5 from the CDS API.
+    """
+    Preprocesses the meteorological data for a given site using slices of ERA5 from the CDS API.
 
     Features will be extracted from the ECMWF ERA5 reanalysis data for the specified site and year.
     The data will be interpolated onto a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest.
@@ -41,19 +47,15 @@ def preprocess_features(site, year, force=False):
         site (str): Site code.
         year (int): Year to process.
         force (bool): If True, force reprocessing even if the file already exists.
+
     """
 
     # Path to the data
     data_path = met_path / site.upper()
-
-    # TODO: make output filename more descriptive, so we can test different feature sets
-    output_filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
-
-    # Check if the data path exists
     if not data_path.exists():
         raise ValueError(f"Data path {data_path} does not exist. Please check the site code.")
 
-    # Check if the output file already exists
+    output_filename = models_path / "features" / f"features_{site}_{year}.csv.gz"
     if output_filename.exists() and not force:
         print(f"Output file {output_filename} already exists. Skipping.")
         return
@@ -61,17 +63,16 @@ def preprocess_features(site, year, force=False):
     # Get the coordinates of the site
     site_lat, site_lon = site_coords_dict[site]
 
-    # creating a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest
+    # Create a grid system with +/- 5 and 10 degrees latitude and longitude from the site of interest
     points_lat = lats_grid + site_lat
     points_lon = lons_grid + site_lon
     points = range(17)
 
-    # creating an xarray DataArray for the grid coordinates
+    # Create an xarray DataArray for the grid coordinates
     lats = xr.DataArray(points_lat, dims=["points"], coords={"points": points})
     lons = xr.DataArray(points_lon, dims=["points"], coords={"points": points})
 
     for var_name in variables.keys():
-
         var = variables[var_name]
         files = sorted((data_path / var["file"]).glob(f"{site.upper()}*{year}*.nc"))
 
@@ -184,7 +185,8 @@ def preprocess_features_arco_era5(site,
                                   force = False,
                                   input_dir = "",
                                   output_dir = ""):
-    """Preprocess features that have been extracted from the ARCO ERA5 reanalysis data.
+    """
+    Preprocess features that have been extracted from the ARCO ERA5 reanalysis data.
 
     These files should have already undergone some preprocessing (see gcp_era5 container), including 
     interpolation onto a grid with +/- 5 and 10 degrees latitude and longitude
@@ -198,8 +200,10 @@ def preprocess_features_arco_era5(site,
             Mainly used for testing purposes. If empty, uses default path.
         output_dir (str): Directory where the output files will be saved if not in location specified in config. 
             Mainly used for testing purposes. If empty, uses default path.
+
     Returns:
         None
+
     """
     
     # Path to the data
@@ -257,7 +261,6 @@ def preprocess_features_arco_era5(site,
         ds = ds.sel(time=~ds.indexes["time"].duplicated())
 
     dfs = []
-
     # For each variable, pivot the (time, points) array into a wide-form DataFrame
     # Use the variables defined in the variables dict to ensure consistency
     for var in variables.keys():
@@ -312,7 +315,10 @@ def preprocess_features_arco_era5(site,
 
 
 def preprocess_all_features(start_year=1978, end_year=2024, force=False):
-    """Preprocesses the meteorological data for all sites and years."""
+    """
+    Preprocesses the meteorological data for all sites and years.
+
+    """
     for site in site_coords_dict.keys():
         for year in range(start_year, end_year):
             try:
@@ -320,17 +326,22 @@ def preprocess_all_features(start_year=1978, end_year=2024, force=False):
             except Exception as e:
                 print(f"Error processing {site} in {year}: {e}")
                 continue
+
     print("Preprocessing complete.")
 
 
 def preprocess_all_features_arco_era5(force=False):
-    """Preprocesses the meteorological data for all sites and years."""
+    """
+    Preprocesses the meteorological data for all sites and years.
+
+    """
     for site in site_coords_dict.keys():
         try:
             preprocess_features_arco_era5(site, force=force)
         except Exception as e:
             print(f"Error processing {site}: {e}")
             continue
+
     print("Preprocessing complete.")
 
 
@@ -339,7 +350,8 @@ def open_features(site,
                 end_year=2024,
                 time_shift_hours=[6, 12, 18, 24],
                 features_dir=""):
-    """Opens the preprocessed features for a given site.
+    """
+    Opens the preprocessed features for a given site.
 
     Args:
         site (str): Site code.
@@ -351,6 +363,7 @@ def open_features(site,
 
     Returns:
         pd.DataFrame: Preprocessed features for the site.
+
     """
 
     features_str = "-arco-era5" if cfg.met_type == "arco-era5" else ""
@@ -419,7 +432,8 @@ def open_features(site,
 
 def feature_importance(model, X_train, y_train,
                        use_permutation=False, n_repeats=100):
-    """Calculates feature importances for a trained model.
+    """
+    Calculates feature importances for a trained model. Groups features by category, i.e. all u- and v-components of wind at all heights.
 
     Args:
         model: The trained model to analyse.
@@ -431,6 +445,7 @@ def feature_importance(model, X_train, y_train,
     Returns:
         pd.DataFrame: DataFrame with columns ['variable', 'importance_mean', 'importance_sum'],
             sorted by importance_mean descending. Variables are grouped by type.
+
     """
 
     if hasattr(model, "feature_importances_") and not use_permutation:
@@ -485,14 +500,15 @@ def feature_importance(model, X_train, y_train,
 
 
 def plot_importance(df_importance, figsize=None):
-    """Plot feature importance.
+    """
+    Plot feature importance.
 
     Args:
         df_importance (pd.DataFrame): DataFrame containing feature importance.
         figsize: Optional (width, height) tuple. Auto-sized if None.
 
     Returns:
-        (fig, ax) — call plt.show() or fig.savefig() in the caller.
+        fig, ax
 
     """
 
