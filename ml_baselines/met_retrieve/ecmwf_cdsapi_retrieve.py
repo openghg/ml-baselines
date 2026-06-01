@@ -1,27 +1,27 @@
 '''
 This script downloads meteorological data from the ECMWF (European Centre for Medium-Range Weather Forecasts) using the CDS (Climate Data Store) API. 
 The data being downloaded has been limited to the area surrounding each site.
-The data being downloaded is u and v wind at pressure levels of 500 and 850 hPa.
+
 '''
 
 import cdsapi
-import sys
-from pathlib import Path
 import os
+import sys
 from multiprocessing import Pool
-from ml_baselines.config import Config
+from pathlib import Path
 
-# Load configuration
+from ml_baselines.config import Config
 cfg = Config()
+
 site_coords_dict = cfg.site_coords_dict
 met_path = Path(cfg.data_path + "/meteorological_data/ECMWF")
 
-# Months as strings with leading zeros
 months = [str(m).zfill(2) for m in range(1, 13)]
 
 
 def retrieve_dict(level, month, year, domain):
-    """ Returns a dictionary of parameters to be used in the CDS API request.
+    """ 
+    Returns a dictionary of parameters to be used in the CDS API request.
 
     Args:
         level (str): 'pressure' or 'single'
@@ -31,6 +31,7 @@ def retrieve_dict(level, month, year, domain):
 
     Returns:
         dict: dictionary of parameters to be used in the CDS API request
+
     """
 
     dict = {
@@ -61,7 +62,8 @@ def retrieve_dict(level, month, year, domain):
 
 def retrieve_site_month(site, level, year, month,
                         domain_size = 11):
-    """ Downloads meteorological data for a specific site and month.
+    """ 
+    Downloads meteorological data for a specific site and month.
 
     Args:
         site (str): site code
@@ -72,6 +74,7 @@ def retrieve_site_month(site, level, year, month,
 
     Returns:
         None
+
     """
 
     if site not in site_coords_dict.keys():
@@ -88,7 +91,6 @@ def retrieve_site_month(site, level, year, month,
     else:
         raise ValueError("Invalid level. Must be 'pressure' or 'single'.")
 
-    # If output path doesn't exist, create it
     if not os.path.exists(output_path):
         os.makedirs(output_path, exist_ok=True)
 
@@ -123,7 +125,8 @@ def retrieve_site_month(site, level, year, month,
 
 
 def retrieve_site_year(level, site, year):
-    """ Downloads meteorological data for a specific site and year.
+    """ 
+    Downloads meteorological data for a specific site and year.
     Just a wrapper for retrieve_site_month to run asynchronously.
 
     Args:
@@ -133,11 +136,9 @@ def retrieve_site_year(level, site, year):
 
     Returns:
         None
+
     """
 
-    # Run asynchronously. Seems to be a limit of 2 or 3 simultaneous requests?
-    # with Pool(2) as pool:
-    #     pool.starmap(retrieve_site_month, [(site, level, year, month) for month in range(12)])
     for month in range(12):
         retrieve_site_month(site, level, year, month)
 
@@ -145,8 +146,6 @@ def retrieve_site_year(level, site, year):
 if __name__ == '__main__':
 
     error_log = met_path / "error_log.txt"
-
-    # Redirect stdout and stderr to a log file
     sys.stdout = open(error_log, "w")
 
     for site in site_coords_dict.keys():
