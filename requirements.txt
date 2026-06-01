@@ -1,5 +1,7 @@
+cartopy
 cdsapi
 dask
+ipywidgets
 joblib
 matplotlib
 netcdf4
