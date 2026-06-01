@@ -1,1 +1,1 @@
-This folder contains trained models for each site
+This folder contains trained models for each site.
