@@ -390,7 +390,7 @@ class BaselineLabelledObservations:
 
     def calculate_true_baseline_cv(self, eval_mode="train", remove_seasonality=True, plot_stl=False, verbose=True):
         """
-        Calculate the coefficient of variation (CV) of true baseline mole fractions
+        Calculate the coefficient of variation (CV) of true baseline molefractions
         for a given evaluation period.
 
         The CV is stored in a dictionary attribute called ``baseline_cv``.
@@ -428,7 +428,7 @@ class BaselineLabelledObservations:
 
     def calculate_monthly_means(self, verbose=True):
         """
-        Calculate monthly mean mole fractions for both predicted and true baselines,
+        Calculate monthly mean molefractions for both predicted and true baselines,
         along with associated statistics (MAE, MAPE, bias).
 
         Results are stored in a DataFrame attribute called ``monthly_means``.

@@ -510,7 +510,7 @@ def plot_stl_components(true_baselines, orig_monthly_means, monthly_means_filled
     for ax in axes:
         axes[0].spines[['top', 'right']].set_visible(False)
 
-    fig.supylabel("Mole fraction in air / ppt")
+    fig.supylabel("Molefraction in air / ppt")
     fig.tight_layout()
 
     return fig, axes
