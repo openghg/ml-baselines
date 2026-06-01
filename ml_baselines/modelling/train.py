@@ -407,6 +407,7 @@ def train_baseline_model(site, model_type="mlp",
     - extra_info (dict): A dictionary containing any additional information requested via the return_scores and return_scaler arguments. Keys may include "scores" (a dictionary of evaluation scores) and "scaler" (the fitted InputPerVariableScaler object).
 
     """
+    start_time = time.time()
 
     # Get the training data
     if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
@@ -459,6 +460,9 @@ def train_baseline_model(site, model_type="mlp",
             X_train_unbalanced = scaler.transform(X_train_unbalanced)
     else:
         scaler = None
+
+    preproc_time = time.time() - start_time
+    if verbose: print(f"Preprocessing time: {preproc_time:.1f}s")
 
     # Fit the model
     start_time = time.time()
