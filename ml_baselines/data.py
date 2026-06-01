@@ -1,14 +1,17 @@
-import xarray as xr
+'''
+This script defines functions used to read in and process data, including the InTEM baseline flags and raw AGAGE observations.
+'''
+
+import io
 import numpy as np
 import pandas as pd
-import io
-from pathlib import Path
+import xarray as xr
 import zipfile
+from pathlib import Path
 
 from ml_baselines.config import Config
-
-
 cfg = Config()
+
 site_coords_dict = cfg.site_coords_dict
 package_path = cfg.package_dir
 root_path = cfg.root_dir
@@ -18,7 +21,7 @@ def read_intem(site,
                start_year = None,
                end_year = None):
     """
-    Extracting baseline flags for a given site
+    Extract baseline flags for a given site
 
     Args:
     - site (str): Site code (e.g., MHD)
@@ -27,6 +30,7 @@ def read_intem(site,
 
     Returns:
     - df (pandas.DataFrame): DataFrame with baseline flags as a binary variable
+
     """
     
     site_translator = {"MHD":"MH",
@@ -39,11 +43,9 @@ def read_intem(site,
                        "RPB":"BA",
                        "SMO":"SM"}
 
-    # zip file location
     intem_zip_path = root_path / "data" / "intem_baselines.zip"
 
     dfs = []
-
     # Find the files in the zip archive
     with zipfile.ZipFile(intem_zip_path, 'r') as zip_ref:
 
@@ -77,15 +79,12 @@ def read_intem(site,
     
     # Creating a dataframe from the list containing all the 'Ct' values
     df = pd.concat(dfs)
-
     df.sort_index(inplace=True)
 
-    # Replace all values in Ct column less than 10 or greater than 20 with 0
-    # not baseline values
+    # Replace all values in Ct column less than 10 or greater than 20 with 0 - not baseline values
     df.loc[(df['Ct'] < 10) | (df['Ct'] >= 20), 'Ct'] = 0
 
-    # Replace all values between 10 and 19 with 1
-    # baseline values
+    # Replace all values between 10 and 19 with 1 - baseline values
     df.loc[(df['Ct'] >= 10) & (df['Ct'] < 20), 'Ct'] = 1
 
     # Rename Ct column to "baseline"
@@ -111,6 +110,7 @@ def read_agage(site, species,
 
     Returns:
         df (pandas.DataFrame): DataFrame with AGAGE data
+
     """
 
     agage_path = Path(cfg.obs_path)

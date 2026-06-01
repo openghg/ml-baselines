@@ -9,23 +9,21 @@ A machine learning library for the estimation of greenhouse gas baseline timeser
 This repository is structured as follows:
 
 ```
-data/ # data files required to run the code
+data/                       # data files required to run the code
    ├── intem_baselines.zip  # baseline flags from InTEM
-   ├── site_info.json # Site information (location, validation/testing periods, etc.)
-   └── met_info.json # Meteorological variable information (variable names, levels, etc.)
-docker/ # dockerfiles for extracting meteorlogical fields from ERA-5 on GCP in a container
-ml_baselines/   # main package
+   ├── site_info.json       # Site information (location, validation/testing periods, etc.)
+   └── met_info.json        # Meteorological variable information (variable names, levels, etc.)
+docker/                     # dockerfiles for extracting meteorlogical fields from ERA-5 on GCP in a container
+ml_baselines/               # main package
 ├── met_retrieve/
 ├── models/
 ├── data/
-└── config.json # untracked config file for specifying paths
-models/ # trained models and features
-└── features/ # extracted features for training/testing
-notebooks/ # Jupyter notebooks for experimentation and visualization
-tests/ # unit and integration tests
+└── config.json             # untracked config file for specifying paths
+models/                     # trained models and features
+└── features/               # extracted features for training/testing
+notebooks/                  # Jupyter notebooks for experimentation and visualization
+tests/                      # unit and integration tests
 ```
-
-In addition, you must specify the location of meteorological fields and mole fraction observations.
 
 ### Configuration
 

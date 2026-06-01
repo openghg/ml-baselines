@@ -1,24 +1,27 @@
-import itertools
-from pathlib import Path
-from datetime import datetime
-import joblib
-import time
+'''
+This script defines functions for preparing data, training and evaluating baseline classification models.
+This includes data loading and preprocessing (balancing, sample weighting, normalising etc), single model manual training and hyperparameter tuning via a grid search.
+'''
 
+import itertools
+import joblib
 import numpy as np
 import pandas as pd
-
+import time
+from datetime import datetime
+from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-
 from sklearn.metrics import precision_score, recall_score, f1_score, get_scorer
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 
 from ml_baselines.data import read_intem
-from ml_baselines.config import Config
 from ml_baselines.features import open_features
 
+from ml_baselines.config import Config
 cfg = Config()
+
 site_coords_dict = cfg.site_coords_dict
 models_path = cfg.models_path
 
@@ -29,27 +32,30 @@ def get_train_test_data(site, test_train,
                         time_shift_hours=[6, 12, 18, 24],
                         return_dataframe=False,
                         balance_method="random", verbose=True):
-    """ Get the training, testing or validation data for a given site.
+    """ 
+    Get the training, testing or validation data for a given site.
 
     Args:
-        site (str): The site for which to get the data.
-        test_train (str): The type of data to get. Must be one of 'train', 'test', 'validation' or 'full', which will return a custom period from the config, or all datasets stacked.
-        balance (bool): If True, balance the dataset by undersampling the majority class.
-            NOTE: This is only applied to training data (ignored for test or validation).
-        undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
-            NOTE: This is only applied to training data (ignored for test or validation).
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
-        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
-        verbose (bool): If True, print verbose output.
+    - site (str): The site for which to get the data.
+    - test_train (str): The type of data to get. Must be one of 'train', 'test', 'validation' or 'full', which will return a custom period from the config, or all datasets stacked.
+    - balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. 
+                       Only applied to training data.
+    - undersample (float or bool): If a float between 0 and 1, randomly undersample the dataset to this fraction.
+                                   Only applied to training data.
+    - time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
+    - return_dataframe (bool): If True, return the data as a DataFrame. If False, return the features and target separately.
+    - balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'.
+    - verbose (bool): If True, print verbose output.
+
     Returns:
-        pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
-                                If return_dataframe is False, returns a tuple (X, y) where X is the features and y is the target.
+    - pd.DataFrame or tuple: If return_dataframe is True, returns a DataFrame with the features and target.
+                             If return_dataframe is False, returns a tuple (X, y) where X is the features and y is the target.
 
     Raises:
-        ValueError: If the test_train argument is not one of 'train', 'test', or 'validation'.
+    - ValueError: If the test_train argument is not one of 'train', 'test', or 'validation'.
+
     """
-    ## let's make this into a dictionary where all of the attributes get collected
+
     periods_dict = {}
     periods_dict["train"] = cfg.training_period[site]
     periods_dict["test"] = cfg.testing_period[site]
@@ -57,7 +63,7 @@ def get_train_test_data(site, test_train,
     if cfg.full_period[site] is not None:
         periods_dict["full"] = cfg.full_period[site]
     else:
-        # make it the min and max of all periods if full_period is not specified in the config
+        # Use the min and max of all periods if full_period is not specified in the config
         periods_dict["full"] = (min(cfg.training_period[site][0], cfg.testing_period[site][0], cfg.validation_period[site][0]),
          max(cfg.training_period[site][1], cfg.testing_period[site][1], cfg.validation_period[site][1]))
         
@@ -93,7 +99,7 @@ def get_train_test_data(site, test_train,
     if test_train == "test":
         train_period = periods_dict["train"]
         val_period = periods_dict["validation"]
-        # first, let's check if there is overlap between either training or validation period and the test period, and if so print a warning
+        # print a warning if overlap
         if ((val_period[0] <= end_year) and (val_period[1] >= start_year)) or ((train_period[0] <= end_year) and (train_period[1] >= start_year)):
             if verbose: print(f"    WARNING: Test period {start_year}-{end_year} overlaps with validation or training periods {val_period[0]}-{val_period[1]} or {train_period[0]}-{train_period[1]}! Removing overlapping data from test set.")
             df = df[~((df.index.year >= train_period[0]) & (df.index.year <= train_period[1]))]
@@ -136,34 +142,35 @@ def get_train_test_data(site, test_train,
 
     if return_dataframe:
         return df
+
     else:
-        # Split the data into features and target
         X = df.drop(columns=["baseline"])
         y = df["baseline"]
         return X, y
 
 
 def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
-    """ Balance the dataset by undersampling the majority class (baseline or non-baseline) to achieve a target ratio.
+    """ 
+    Balance the dataset by undersampling the majority class (baseline or non-baseline) to achieve a target ratio.
     
     Args:
-        df (pd.DataFrame): The input DataFrame containing a 'baseline' column with values 0 or 1.
-        target_baseline_ratio (float): The desired ratio of baseline (1) to non-baseline (0) values in the output DataFrame.
+    - df (pd.DataFrame): The input DataFrame containing a 'baseline' column with values 0 or 1.
+    - target_baseline_ratio (float): The desired ratio of baseline (1) to non-baseline (0) values in the output DataFrame.
         
     Returns:
-        pd.DataFrame: A balanced DataFrame with the specified ratio of baseline to non-baseline values.
+    - pd.DataFrame: A balanced DataFrame with the specified ratio of baseline to non-baseline values.
     
     Raises:
-        ValueError: If the input DataFrame does not contain a 'baseline' column or if the target ratio is not between 0 and 1.
+    - ValueError: If the input DataFrame does not contain a 'baseline' column or if the target ratio is not between 0 and 1.
+
     """
 
-    def undersample(df,
-                    majority_indices_to_subsample,
-                    minority_indices,
-                    target_majority_ratio,
-                    majority_count,
-                    minority_count,
-                    method="random"):
+    def undersample(df, majority_indices_to_subsample, minority_indices, target_majority_ratio,
+                    majority_count, minority_count, method="random"):
+        """
+        Undersample the majority class to achieve a target majority ratio.
+
+        """
         undersample_ratio = target_majority_ratio * minority_count / \
                             (majority_count * (1 - target_majority_ratio))
 
@@ -181,13 +188,14 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
                 desired_count = 1
                 print("WARNING: Desired count for majority class is less than 1. Setting to 1.")
             indices = np.linspace(0, len(majority_indices_to_subsample) - 1, desired_count).astype(int)
-            indices = np.unique(indices)  # Ensure unique indices
+            indices = np.unique(indices)
             sampled_majority_indices = majority_indices_to_subsample[indices]
         else:
             raise ValueError(f"Unknown undersampling method: {method}, must be 'random' or 'deterministic'.")
 
         # Add the minority values
         return pd.concat([df.loc[sampled_majority_indices], df.loc[minority_indices]])
+
 
     if 'baseline' not in df.columns:
         raise ValueError("Input DataFrame must contain a 'baseline' column.")
@@ -201,9 +209,8 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
 
     baseline_ratio = baseline_count / (baseline_count + non_baseline_count)
 
-    # If there are too many baseline values, we need to undersample them
     if baseline_ratio > target_baseline_ratio:
-
+        # If there are too many baseline values, we need to undersample them
         df_balanced = undersample(df,
                                   df[df['baseline'] == 1].index,
                                   df[df['baseline'] == 0].index,
@@ -222,7 +229,6 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
                                   baseline_count,
                                   method=method)
 
-    # Sort the DataFrame
     df_balanced = df_balanced.sort_index()
 
     return df_balanced
@@ -231,17 +237,21 @@ def balance_dataset(df, target_baseline_ratio=0.5, method="random"):
 def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, verbose=True):
     """ 
     Generate a Series of sample weights for the baseline dataset, using the specified weights.  
-    
-    Samples with a higher weight will have more influence on the model during training. This can be used to address class imbalance by giving more weight to the minority class (baseline). If baseline_weight == "auto", it will be set to 1/class_frequency, and non_baseline_weight will be set to 1.0. If baseline_weight is a float, it will be used directly, and non_baseline_weight will be used for the other class.
+    Samples with a higher weight will have more influence on the model during training. 
+    This can be used to address class imbalance by giving more weight to the minority class (baseline). 
+    If baseline_weight == "auto", it will be set to 1/class_frequency, and non_baseline_weight will be set to 1.0. 
+    If baseline_weight is a float, it will be used directly, and non_baseline_weight will be used for the other class.
 
     Args:
-        y (pd.Series): The target variable containing 0s and 1s, where 1 indicates the baseline class and 0 indicates the non-baseline class.
-        baseline_weight (float or str): The weight to assign to the baseline class (1s). If "auto", it will be set to 1/class_frequency. Default is 1.0.
-        non_baseline_weight (float): The weight to assign to the non-baseline class (0s). Default is 1.0.
+    - y (pd.Series): The target variable containing 0s and 1s, where 1 indicates the baseline class and 0 indicates the non-baseline class.
+    - baseline_weight (float or str): The weight to assign to the baseline class (1s). If "auto", it will be set to 1/class_frequency. Default is 1.0.
+    - non_baseline_weight (float): The weight to assign to the non-baseline class (0s). Default is 1.0.
 
     Returns:
-        pd.Series: A Series of sample weights corresponding to each entry in y, with the same index. 
+    - pd.Series: A Series of sample weights corresponding to each entry in y, with the same index.
+
     """
+
     weights = pd.Series(np.ones_like(y, dtype=float), index=y.index)
     if baseline_weight == "auto":
         if np.sum(y == 1) == 0:
@@ -270,17 +280,21 @@ def generate_sample_weights(y, baseline_weight=1.0, non_baseline_weight=1.0, ver
 
 
 class InputPerVariableScaler:
-    def __init__(self, aux_variables=["hour_of_day", "day_of_year"]):
-        """
-        Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler.
-        This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale.
-        The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
-        """
+    """
+    Scale the input features separately for each variable (e.g. u10, v10, u850, etc.) using StandardScaler.
+    This normalises each variable independently while still keeping the different time-shifted features of the same variable on the same scale.
+    The aux_variables argument specifies any additional variables that should be treated as separate groups and scaled independently (e.g. hour_of_day and day_of_year).
 
+    """
+    def __init__(self, aux_variables=["hour_of_day", "day_of_year"]):
         self.scalers = {}
         self.aux_variables = aux_variables.copy()
     
     def fit(self, X, feature_names=None):
+        """
+        Fit the scaler on the input features, learning the mean and variance for each variable group.
+
+        """
         if isinstance(X, np.ndarray) and feature_names is None:
             raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
         elif isinstance(X, np.ndarray) and feature_names is not None:
@@ -293,7 +307,7 @@ class InputPerVariableScaler:
         col_names = [col for col in col_names if col not in self.aux_variables] + [col for col in self.aux_variables if col in col_names]
         self.col_names = col_names
 
-        column_groups = { }
+        column_groups = {}
         for col in col_names:
             if col in self.aux_variables:
                 column_groups[col] = [col]
@@ -306,9 +320,12 @@ class InputPerVariableScaler:
             train_data = X[columns] if len(columns) > 1 else X[columns].values.reshape(-1, 1)
             scaler.fit(train_data)
             self.scalers[group] = scaler
-        
 
     def transform(self, X, feature_names=None):
+        """
+        Transform the input features using the fitted scaler.
+
+        """
         if isinstance(X, np.ndarray) and feature_names is None:
             raise ValueError("If X is a numpy array, feature_names must be provided as a list of column names.")
         elif isinstance(X, np.ndarray) and feature_names is not None:
@@ -333,44 +350,64 @@ class InputPerVariableScaler:
         return X_transformed
     
     def fit_transform(self, X, feature_names=None):
+        """
+        Fit the scaler on the input features and transform them in one step.
+
+        """
         self.fit(X, feature_names=feature_names)
         return self.transform(X, feature_names=feature_names)
 
 
 def train_baseline_model(site, model_type="mlp",
-            balance=0.5,
-            balance_method="random",
-            undersample=0,
-            sample_weights=None,
-            normalise_inputs=False,
-            time_shift_hours=[6, 12, 18, 24], prediction_threshold=0.5,
-            model_params=None, return_scores=False, return_scaler=False, verbose=True, save_model=False, save_folder=cfg.models_path, save_suffix=None, evaluate_on_test=True, random_seed=42):
-    """ Train a model to classify baseline events for a given site.
+                         balance=0.5, balance_method="random",
+                         undersample=0, sample_weights=None,
+                         normalise_inputs=False, time_shift_hours=[6, 12, 18, 24], 
+                         prediction_threshold=0.5, model_params=None, 
+                         return_scores=False, return_scaler=False, return_inputs=False,
+                         verbose=True, 
+                         save_model=False, save_folder=cfg.models_path, save_suffix=None, 
+                         evaluate_on_test=True, 
+                         random_seed=42):
+    """ 
+    Train a model to classify baseline events for a given site.
 
     Args:
-        site (str): The site for which to train the model.
-        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting". Note that the model_params need to be appropriate for the chosen model type  
-        balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. Only applied to training data.
-        balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. Only applied to training data.
-        undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. Only applied to training data.
-        sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. If None, no sample weights will be used.
-        normalise_inputs (bool): Whether to normalise the input features based on category using InputPerVariableScaler.
-        time_shift_hours (list of int): List of time shifts in hours to create lagged features for. For example, [6, 24] will create features shifted by 6 and 24 hours.
-        model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
-        return_scores (bool): Whether to return the evaluation scores as a dictionary.
-        return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
-        verbose (bool): Whether to print verbose output.
-        evaluate_on_test (bool): Whether to evaluate the model on the test set after training. If False, test-set metrics will not be computed or reported. Defaults to True.
-        save_model (bool): Whether to save the trained model.
-        save_folder (str): The folder where the model should be saved. It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp.
-        save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
-        random_seed (int): The random seed to use for reproducible results.
+    - site (str): The site for which to train the model.
+    - model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting". 
+                        Note that the model_params need to be appropriate for the chosen model type.
+    - balance (float): The target ratio of baseline to non-baseline values in the training data. Must be between 0 and 1. 
+                       Only applied to training data.
+    - balance_method (str): The method to use for balancing the dataset. Must be one of 'random' or 'deterministic'. 
+                            Only applied to training data.
+    - undersample (float): If a float between 0 and 1, randomly undersample the training dataset to this fraction. 
+                           Only applied to training data.
+    - sample_weights (float or str "auto"): If a float, the weight to assign to the baseline class (1s) during training, 
+                                            where non-baseline instances receive a weight of 1.0. If "auto", it will be set to 1/class_frequency. 
+                                            If None, no sample weights will be used.
+    - normalise_inputs (bool): Whether to normalise the input features based on category using InputPerVariableScaler.
+    - time_shift_hours (list of int): List of time shifts in hours to create lagged features for. 
+                                      For example, [6, 24] will create features shifted by 6 and 24 hours.
+    - model_params (dict): A dictionary of hyperparameters to pass to the model. If None, default parameters will be used.
+    - return_scores (bool): Whether to return the evaluation scores as a dictionary.
+    - return_scaler (bool): Whether to return the fitted scaler used for normalising input features.
+    - return_inputs (bool): Whether to return the inputs/kwargs used to train the model.
+    - verbose (bool): Whether to print verbose output.
+    - evaluate_on_test (bool): Whether to evaluate the model on the test set after training. 
+                               If False, test-set metrics will not be computed or reported. Defaults to True.
+    - save_model (bool): Whether to save the trained model.
+    - save_folder (str): The folder where the model should be saved. 
+                         It will be saved in a subfolder named after the site, with a filename based on the model type and current timestamp.
+    - save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
+    - random_seed (int): The random seed to use for reproducible results.
+
     Returns:
-        model: The trained model.
-        X_train (pd.DataFrame): The feature matrix used for training.
-        y_train (pd.DataFrame): The target labels used for training.
-        extra_info (dict): A dictionary containing any additional information requested via the return_scores and return_scaler arguments. Keys may include "scores" (a dictionary of evaluation scores) and "scaler" (the fitted InputPerVariableScaler object).
+    - model: The trained model.
+    - X_train (pd.DataFrame): The feature matrix used for training.
+    - y_train (pd.DataFrame): The target labels used for training.
+    - extra_info (dict): A dictionary containing any additional information requested via the return_scores and return_scaler arguments. Keys may include "scores" (a dictionary of evaluation scores) and "scaler" (the fitted InputPerVariableScaler object).
+
     """
+    start_time = time.time()
 
     # Get the training data
     if verbose: print(f"Training {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
@@ -382,7 +419,6 @@ def train_baseline_model(site, model_type="mlp",
     else:
         X_train_unbalanced, y_train_unbalanced = None, None
 
-    
     if sample_weights is not None:
         if verbose: print("... calculating sample weights")
         weights = generate_sample_weights(y_train, baseline_weight=sample_weights, non_baseline_weight=1.0, verbose=verbose)
@@ -413,7 +449,6 @@ def train_baseline_model(site, model_type="mlp",
         X_test, y_test = get_train_test_data(site, "test",
                                          time_shift_hours=time_shift_hours, verbose=verbose)
 
-
     if normalise_inputs:
         if verbose: print("... normalising inputs")
         scaler = InputPerVariableScaler()
@@ -423,9 +458,11 @@ def train_baseline_model(site, model_type="mlp",
             X_test = scaler.transform(X_test)
         if X_train_unbalanced is not None:
             X_train_unbalanced = scaler.transform(X_train_unbalanced)
-
     else:
         scaler = None
+
+    preproc_time = time.time() - start_time
+    if verbose: print(f"Preprocessing time: {preproc_time:.1f}s")
 
     # Fit the model
     start_time = time.time()
@@ -531,6 +568,8 @@ def train_baseline_model(site, model_type="mlp",
         extra_info["scores"] = scores
     if return_scaler:
         extra_info["scaler"] = scaler
+    if return_inputs:
+        extra_info["model_inputs"] = {"model_params": model_params, "balance": balance, "balance_method": balance_method, "undersample": undersample, "sample_weights": sample_weights, "normalise_inputs": normalise_inputs, "time_shift_hours": time_shift_hours, "prediction_threshold": prediction_threshold}
 
     if save_model:
         if save_folder is None:
@@ -540,12 +579,10 @@ def train_baseline_model(site, model_type="mlp",
             # if scaler isnt returned save it anyway
             
             info_to_save = {"scores": scores, "scaler": scaler, "model_inputs": {"model_params": model_params, "balance": balance, "balance_method": balance_method, "undersample": undersample, "sample_weights": sample_weights, "normalise_inputs": normalise_inputs, "time_shift_hours": time_shift_hours, "prediction_threshold": prediction_threshold}}
-
             to_save  = {
                 "model": model,
                 "info": info_to_save,
             }
-
             save_path = Path(save_folder) / site / f"{model_type}_model_{datetime.now().strftime('%Y-%m-%d_%H-%M')}{f'_{save_suffix}' if save_suffix is not None else ''}.joblib"
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -555,15 +592,16 @@ def train_baseline_model(site, model_type="mlp",
     return model, X_train, y_train, extra_info
 
 
-
 def get_default_params_grid(model_type):
-    """ Retrieve a default dictionary of hyperparameters to tune in a grid search for a given model.
+    """ 
+    Retrieve a default dictionary of hyperparameters to tune in a grid search for a given model.
 
     Args:
-        model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting".
+    - model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting".
 
     Returns:
-        param_grid (dict): A dictionary containing model hyperparameters to tune.
+    - param_grid (dict): A dictionary containing model hyperparameters to tune.
+
     """
 
     valid_model_types = ["mlp", "random_forest", "gradient_boosting"]
@@ -615,66 +653,45 @@ def train_baseline_model_grid_search(site,
                           save_cv_scores=False,
                           save_cv_scores_folder=cfg.models_path,
                           save_suffix=None):
-    """ Train a model to classify baseline events using grid search for hyperparameter tuning.
-
-    The grid search explores both the model hyperparameters in ``param_grid`` and
-    all combinations of data-loading options supplied via ``data_kwargs``.
+    """
+    Train a model to classify baseline events using grid search for hyperparameter tuning.
+    The grid search explores both the model hyperparameters in param_grid and all combinations of data-loading options supplied via data_kwargs.
 
     Args:
-        site (str): The site for which to train the model.
-        model_type (str): The type of model to train. Currently accepts "mlp",
-            "random_forest", or "gradient_boosting". Note that the param_grid
-            needs to be appropriate for the chosen model type.
-        scoring (str or list): Metrics to evaluate during grid search. Can be a
-            single metric (e.g. "f1") or a list of metrics (e.g. ["f1", "precision", "recall"]).
-            If a list is provided, the first metric will be used for selecting the best model (refit),
-            and scores for all metrics will be returned in cv_results if return_cv_scores is True.
-        param_grid (dict, optional): A dictionary containing model
-            hyperparameters to tune. If None, default values are used.
-        data_kwargs (dict, optional): A dictionary where each key is a keyword
-            argument accepted by :func:`get_train_test_data` and each value is a
-            list of options to explore. All combinations of options are tried.
-            The special keys ``sample_weights`` and ``normalise_inputs`` are also supported.
-            ``sample_weights`` controls class weighting during model fitting (not data loading),
-            and ``normalise_inputs`` fits a scaler on train data and applies to the validation set.
-            For example::
+    - site (str): The site for which to train the model.
+    - model_type (str): The type of model to train. Currently accepts "mlp", "random_forest", or "gradient_boosting".
+                        Note that the param_grid needs to be appropriate for the chosen model type.
+    - scoring (str or list): Metrics to evaluate during grid search. Can be a single metric (e.g. "f1") or a list 
+                             (e.g. ["f1", "precision", "recall"]). If a list is provided, the first metric will be 
+                             used for selecting the best model, and scores for all metrics will be returned in cv_results.
+    - param_grid (dict, optional): A dictionary containing model hyperparameters to tune. If None, default values are used.
+    - data_kwargs (dict, optional): A dictionary where each key is a keyword argument accepted by get_train_test_data 
+                                    and each value is a list of options to explore. All combinations of options are tried.
+                                    The special keys sample_weights and normalise_inputs are also supported.
+                                    Valid keys are balance, undersample, time_shift_hours, balance_method, sample_weights 
+                                    and normalise_inputs. If None, defaults to 
+                                    {"balance": [-1], "time_shift_hours": [[6, 12, 18, 24]], "normalise_inputs": [False]}.
+    - prediction_thresholds (list of float, optional): Prediction thresholds to evaluate after the grid search. 
+                                                       For each data-kwarg combo, the grid search is run once at 0.5; 
+                                                       the best model is then re-evaluated at every threshold in this list.
+                                                       Defaults to [0.5].
+    - validation_keys (list of str, optional): Keys from data_kwargs that should also be forwarded when loading the 
+                                               validation set. Only keys affecting feature representation should be included
+                                               (e.g. time_shift_hours); training-only keys such as balance should be omitted.
+                                               If None, defaults to ["time_shift_hours"].
+    - return_cv_scores (bool): Whether to return the grid search results as a pandas DataFrame. Defaults to False.
+    - save_cv_scores (bool): Whether to save the grid search results to a CSV file. Requires return_cv_scores=True.
+    - save_cv_scores_folder (str, optional): The folder where the grid search results CSV will be saved. 
+                                             Defaults to cfg.models_path.
+    - save_suffix (str, optional): A suffix to append to the saved results filename. If None, no suffix will be added.
 
-                {
-                    "balance": [-1, 0.5],
-                    "time_shift_hours": [[6, 12, 18, 24], [6, 24]],
-                    "sample_weights": [None, "auto", 2.0],
-                    "normalise_inputs": [True, False],
-                }
-
-            Valid keys are ``balance``, ``undersample``, ``time_shift_hours``,
-            ``balance_method``, ``sample_weights`` and ``normalise_inputs``. If None, defaults to
-            ``{"balance": [-1], "time_shift_hours": [[6, 12, 18, 24]], "normalise_inputs": [False]}``.
-        prediction_thresholds (list of float, optional): Prediction thresholds to
-            evaluate after the grid search. For each data-kwarg combo, the grid
-            search is run once (at the default 0.5 threshold); the best model
-            found is then re-evaluated at every threshold in this list. The
-            global winner is the ``(combo, threshold)`` pair with the highest
-            primary-metric score. In ``cv_results``, all parameter sets carry
-            ``prediction_threshold = 0.5`` from the grid search; extra rows are
-            appended for the best model in each combo at every other threshold.
-            Defaults to ``[0.5]``.
-        validation_keys (list of str, optional): Keys from ``data_kwargs`` that
-            should also be forwarded when loading the validation set. Only
-            keywords that affect the feature representation (e.g.
-            ``"time_shift_hours"``) should be included here; training-only
-            options such as ``"balance"`` or ``"undersample"`` should be
-            omitted. If None, defaults to ``["time_shift_hours"]``.
-        return_cv_scores (bool, optional): Whether to return the grid search results as a pandas dataset
-        save_cv_scores (bool): Whether to save the grid search results, if return_cv_scores is True
-        save_cv_scores_folder (str, optional): The folder where to save the grid search results as a csv from the pandas dataset, if return_cv_scores is True. If None, the results will not be saved to a csv.
-        save_suffix (str, optional): A suffix to append to the saved model filename. If None, no suffix will be added.
     Returns:
-        tuple: ``(best_model, best_scaler, best_params, best_data_kwargs, best_threshold)`` — the fitted
-            model, an ``InputPerVariableScaler`` fitted on the winning training data (or ``None`` if ``normalise_inputs`` is False in the winning data-kwargs dict),
-            the winning hyperparameter dict, the winning data-kwargs dict, and the winning prediction threshold.
+    - tuple: (best_model, best_scaler, best_params, best_data_kwargs, best_threshold) — the fitted model, 
+             an InputPerVariableScaler fitted on the winning training data (or None if normalise_inputs is False),
+             the winning hyperparameter dict, the winning data-kwargs dict, and the winning prediction threshold.
+             If return_cv_scores is True, a fifth element is returned:
+    - cv_results (pd.DataFrame): A DataFrame of grid search results for each combination tested.
 
-        If ``return_cv_scores`` is True, a fifth element is returned:
-        cv_results (pandas.DataFrame): A dataset of grid search results for each combination tested.
     """
     print(f"Running grid search for {model_type.upper() if model_type == 'mlp' else model_type} model for site: {site}")
 
@@ -724,7 +741,7 @@ def train_baseline_model_grid_search(site,
     best_thresholds_list = []
     cv_results = {}
 
-    if type(scoring) == list:
+    if isinstance(scoring, list):
         refit = scoring[0]
     else:
         refit = True

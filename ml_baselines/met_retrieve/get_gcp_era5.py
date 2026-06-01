@@ -1,8 +1,14 @@
-import xarray as xr
-import numpy as np
-import gcsfs
-import tempfile
+'''
+This script downloads meteorological data from the ECMWF (European Centre for Medium-Range Weather Forecasts) ARCO-ERA5 dataset on the Google Cloud Storage bucket.
+The data being downloaded has been limited to the area surrounding each site.
+
+'''
+
 import argparse
+import gcsfs
+import numpy as np
+import tempfile
+import xarray as xr
 
 from ml_baselines.config import Config
 from ml_baselines.utils import longitude_to_360
@@ -25,12 +31,14 @@ variables_2d = ["10m_u_component_of_wind", "10m_v_component_of_wind",
 
 
 def retrieve_grid(arco_era5_location):
-    """ Retrieve the grid from the ARCO ERA5 dataset.
+    """ 
+    Retrieve the grid from the ARCO ERA5 dataset.
 
     Args:
         arco_era5_location (str): The location of the ARCO ERA5 dataset.
     Returns:
         tuple: A tuple containing the grid latitudes, longitudes, and levels.
+
     """
 
     with xr.open_zarr(
@@ -46,12 +54,14 @@ def retrieve_grid(arco_era5_location):
 
 
 def define_points(site):
-    """ Define points based on the site coordinates and the grid.
+    """ 
+    Define points based on the site coordinates and the grid.
 
     Args:
         site (str): The site for which to define points.
     Returns:
         tuple: A tuple containing the latitude points, longitude points, and their indices.
+
     """
 
     points_lat = []
@@ -84,6 +94,7 @@ def find_closest_grid_points(grid_lats, grid_lons,
 
     Returns:
         tuple: A tuple containing the closest latitude points, longitude points, and level points.
+
     """
     global levels
 
@@ -112,7 +123,8 @@ def find_closest_grid_points(grid_lats, grid_lons,
 
 
 def get(year, lats, lons, levels):
-    """ Retrieve the dataset for the specified latitudes, longitudes, and levels.
+    """ 
+    Retrieve the dataset for the specified latitudes, longitudes, and levels.
     Args:
         year (int): The year of interest.
         lats (xarray.DataArray): The latitude points.
@@ -120,6 +132,7 @@ def get(year, lats, lons, levels):
         levels (xarray.DataArray): The level points.
     Returns:
         xarray.Dataset: The dataset containing the specified variables.
+
     """
 
     time_slice = slice(f"{year}-01-01T00:00:00",
@@ -152,12 +165,14 @@ def get(year, lats, lons, levels):
 
 
 def save_to_bucket(ds_points, bucket_name, file_name):
-    """ Save the dataset to a Google Cloud Storage bucket.
+    """ 
+    Save the dataset to a Google Cloud Storage bucket.
 
     Args:
         ds_points (xarray.Dataset): The dataset to save.
         bucket_name (str): The name of the GCP bucket.
         file_name (str): The name of the file to save.
+
     """
 
     with tempfile.NamedTemporaryFile(suffix=".nc") as tmp:
@@ -170,11 +185,13 @@ def save_to_bucket(ds_points, bucket_name, file_name):
 
 
 def run(site, year):
-    """ Run the process to retrieve and save ERA5 data for a specific site.
+    """ 
+    Run the process to retrieve and save ERA5 data for a specific site.
 
     Args:
         site (str): The site for which to retrieve data.
         year (int): The year of interest.
+
     """
     global levels
 
