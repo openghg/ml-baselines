@@ -314,7 +314,7 @@ def calculate_monthly_means(labelled_df, add_stats=True):
     if add_stats:
         monthly_means["true_coeffvariation"] = monthly_means["true_monthly_std"] / monthly_means["true_monthly_mf"]
         monthly_means["MAE"] = np.abs(monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"])
-        monthly_means["MAPE"] = monthly_means["MAE"] / monthly_means["true_monthly_mf"]
+        monthly_means["MAPE"] = 100 * monthly_means["MAE"] / monthly_means["true_monthly_mf"]
         monthly_means["bias"] = monthly_means["pred_monthly_mf"] - monthly_means["true_monthly_mf"]
 
     return monthly_means
@@ -462,7 +462,7 @@ class BaselineLabelledObservations:
             bias = np.mean(period_df["bias"])
             rmse = np.sqrt(np.mean((period_df["MAE"] ** 2)))
 
-            if verbose: print(f"{period[:6]} set - MAE: {mae:.3f}, MAPE: {100*mape:.3f}%, bias: {bias:.3f}, RMSE: {rmse:.3f}")
+            if verbose: print(f"{period[:6]} set - MAE: {mae:.3f}, MAPE: {mape:.3f}%, bias: {bias:.3f}, RMSE: {rmse:.3f}")
 
             scores[period] = {"MAE": mae, "MAPE": mape, "bias": bias, "RMSE": rmse}
 
