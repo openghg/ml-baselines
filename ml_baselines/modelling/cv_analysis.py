@@ -1,9 +1,13 @@
-import math
-import re
+'''
+This script defines functions for loading, analysing and visualising cross-validation results from hyperparameter search experiments.
+Tools include identifying the best hyperparameter sets and plotting effects as bar charts and heatmaps.
+'''
 
-from matplotlib import pyplot as plt
+import math
 import numpy as np
 import pandas as pd
+import re
+from matplotlib import pyplot as plt
 from pathlib import Path
 
 from ml_baselines.config import Config
@@ -22,6 +26,7 @@ def load_cv_results(site, save_suffix, model_type, save_path=cfg.models_path) ->
     Returns:
         DataFrame with all columns as-is, plus recalculated rank_test_<metric>
         columns that are global across all data_kwarg groups.
+
     """
     filename = f"cv_results_{site}_{model_type}.csv" if save_suffix is None else f"cv_results_{site}_{model_type}_{save_suffix}.csv"
     filepath = Path(save_path) / site / filename
@@ -67,10 +72,12 @@ def _resolve_metric(cv_df: pd.DataFrame, metric: str | None) -> str:
 
 
 def _param_cols(cv_df: pd.DataFrame) -> list[str]:
+    """Return a list of params from CV results."""
     return [c for c in cv_df.columns if c.startswith("param_")]
 
 
 def _score_display_name(metric: str) -> str:
+    """Reformat metric name."""
     return metric.replace("_", " ")
 
 
@@ -91,6 +98,7 @@ def get_best_params(cv_df: pd.DataFrame, n: int = 1, metric: str | None = None) 
     Returns:
         DataFrame with param_* columns plus test score, train score, and rank,
         sorted best-first.
+
     """
     metric = _resolve_metric(cv_df, metric)
     score_col = f"mean_test_{metric}"
@@ -99,12 +107,7 @@ def get_best_params(cv_df: pd.DataFrame, n: int = 1, metric: str | None = None) 
     return cv_df[keep_cols].sort_values(score_col, ascending=False).head(n).reset_index(drop=True)
 
 
-def get_top_params(
-    cv_df: pd.DataFrame,
-    threshold: float | None = None,
-    n: int = 5,
-    metric: str | None = None,
-) -> pd.DataFrame:
+def get_top_params(cv_df: pd.DataFrame, threshold: float | None = None, n: int = 5, metric: str | None = None) -> pd.DataFrame:
     """
     Return parameter sets that meet a score threshold, or the top n if no
     threshold is given.
@@ -120,20 +123,23 @@ def get_top_params(
     Returns:
         Filtered and sorted DataFrame (best-first) with param_* columns,
         test score, train score, and rank columns.
+
     """
     metric = _resolve_metric(cv_df, metric)
+
     score_col = f"mean_test_{metric}"
     keep_cols = _param_cols(cv_df) + [score_col, f"mean_train_{metric}", f"rank_test_{metric}"]
     keep_cols = [c for c in keep_cols if c in cv_df.columns]
+
     df = cv_df[keep_cols].sort_values(score_col, ascending=False)
+
     if threshold is not None:
         return df[df[score_col] >= threshold].reset_index(drop=True)
+
     return df.head(n).reset_index(drop=True)
 
 
-def summarise_param_effects(
-    cv_df: pd.DataFrame, metric: str | None = None
-) -> dict[str, pd.DataFrame]:
+def summarise_param_effects(cv_df: pd.DataFrame, metric: str | None = None) -> dict[str, pd.DataFrame]:
     """
     For each param_* column, compute mean, std, and count of the test score
     grouped by that parameter's values.
@@ -146,6 +152,7 @@ def summarise_param_effects(
     Returns:
         Dict mapping each param column name to a DataFrame with columns:
         [param_value, mean_score, std_score, count].
+
     """
     metric = _resolve_metric(cv_df, metric)
     score_col = f"mean_test_{metric}"
@@ -160,14 +167,11 @@ def summarise_param_effects(
         grouped = grouped.rename(columns={col: "param_value"})
         grouped = grouped.sort_values("mean_score", ascending=False).reset_index(drop=True)
         results[col] = grouped
+
     return results
 
 
-def plot_param_effects(
-    cv_df: pd.DataFrame,
-    metric: str | None = None,
-    figsize: tuple | None = None,
-) -> tuple:
+def plot_param_effects(cv_df: pd.DataFrame, metric: str | None = None, figsize: tuple | None = None) -> tuple:
     """
     Plot a grid of bar charts showing mean score (± std) for each value of
     every param_* column.
@@ -181,6 +185,7 @@ def plot_param_effects(
 
     Returns:
         (fig, axes) — call plt.show() or fig.savefig() in the caller.
+
     """
     if metric == "all":
         return _plot_param_effects_all_metrics(cv_df, figsize=figsize)
@@ -218,6 +223,7 @@ def plot_param_effects(
 
     fig.suptitle(f"Mean {score_label} by parameter value", fontsize=13)
     fig.tight_layout()
+
     return fig, axes
 
 
@@ -227,7 +233,6 @@ def _plot_param_effects_all_metrics(cv_df: pd.DataFrame, figsize: tuple | None =
     if not metrics:
         raise ValueError("No mean_test_<metric> columns found in cv_df.")
 
-    # Build {metric: {param_col: grouped_df}} by reusing summarise_param_effects
     effects_by_metric = {m: summarise_param_effects(cv_df, metric=m) for m in metrics}
 
     param_cols = list(next(iter(effects_by_metric.values())).keys())
@@ -250,7 +255,6 @@ def _plot_param_effects_all_metrics(cv_df: pd.DataFrame, figsize: tuple | None =
 
     for i, col in enumerate(param_cols):
         ax = axes_flat[i]
-        # Use param_value order from first metric's grouped df (sorted by mean score)
         param_values = effects_by_metric[metrics[0]][col]["param_value"].tolist()
         x = np.arange(len(param_values))
 
@@ -283,16 +287,11 @@ def _plot_param_effects_all_metrics(cv_df: pd.DataFrame, figsize: tuple | None =
 
     fig.suptitle("Mean scores by parameter value", fontsize=13)
     fig.tight_layout()
+
     return fig, axes
 
 
-def plot_score_heatmap(
-    cv_df: pd.DataFrame,
-    param_x: str,
-    param_y: str,
-    metric: str | None = None,
-    ax=None,
-) -> tuple:
+def plot_score_heatmap(cv_df: pd.DataFrame, param_x: str, param_y: str, metric: str | None = None, ax=None) -> tuple:
     """
     Plot a 2D heatmap of mean score across two parameters.
 
@@ -309,6 +308,7 @@ def plot_score_heatmap(
     Returns:
         (fig, ax) — call plt.show() or fig.savefig() in the caller. If an ax
         was passed in, fig is the parent figure of that ax.
+
     """
     metric = _resolve_metric(cv_df, metric)
     score_col = f"mean_test_{metric}"
@@ -351,4 +351,5 @@ def plot_score_heatmap(
                 ax.text(col_j, row_i, f"{val:.3f}", ha="center", va="center", fontsize=9)
 
     fig.tight_layout()
+
     return fig, ax
